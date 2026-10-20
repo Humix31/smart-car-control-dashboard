@@ -1,4 +1,5 @@
 import { Battery, Gauge, Radio, Wifi } from 'lucide-react';
+import './Telemetry.css';
 
 export function BatteryIndicator({ percentage }) {
   const available = typeof percentage === 'number';
@@ -21,12 +22,14 @@ export function TelemetryPanel({ telemetry, connected, cameraConnected }) {
     { label: 'Current speed', value: typeof telemetry.currentSpeed === 'number' ? `${telemetry.currentSpeed}%` : 'N/A', icon: Gauge },
     { label: 'Wi-Fi signal', value: typeof telemetry.wifiSignal === 'number' ? `${telemetry.wifiSignal} dBm` : 'N/A', icon: Wifi },
     { label: 'Motor status', value: telemetry.motorStatus || 'N/A', icon: Radio },
+    { label: 'Ultrasonic distance', value: typeof telemetry.distanceCm === 'number' ? `${telemetry.distanceCm.toFixed(1)} cm` : 'N/A', icon: Gauge },
     { label: 'Camera status', value: cameraConnected ? 'Streaming' : 'N/A', icon: Radio },
     { label: 'Last telemetry', value: telemetry.receivedAt ? new Date(telemetry.receivedAt).toLocaleTimeString() : 'N/A', icon: ActivityIcon },
   ];
   return (
     <section className="panel telemetry-panel" id="telemetry">
       <div className="panel-heading"><div><div className="eyebrow">VEHICLE HEALTH</div><h2>Telemetry</h2></div><span className="telemetry-live"><i />{connected ? 'LIVE UPDATES' : 'WAITING FOR VEHICLE'}</span></div>
+      {telemetry.obstacleDetected === true && <div className="obstacle-warning" role="alert">OBSTACLE DETECTED{typeof telemetry.distanceCm === 'number' ? ` · ${telemetry.distanceCm.toFixed(1)} CM` : ''}</div>}
       <div className="telemetry-grid">{entries.map(({ label, value, icon: Icon }) => <div className="telemetry-item" key={label}><span className="telemetry-item-icon"><Icon size={16} /></span><span><small>{label}</small><b>{value}</b></span></div>)}</div>
     </section>
   );

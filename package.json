@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "concurrently -k \"node server.js\" \"npm run dev --workspace client\"",
     "build": "npm run build --workspace client",
+    "test": "node --test",
     "start": "node server.js"
   },
   "dependencies": {

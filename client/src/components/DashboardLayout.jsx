@@ -26,7 +26,7 @@ export function Sidebar({ activeSection, onNavigate }) {
       </nav>
       <div className="sidebar-bottom">
         <div className="vehicle-mini"><span className="vehicle-icon"><CarFront size={17} /></span><span><b>ROVER-01</b><small>PRIMARY VEHICLE</small></span><i /></div>
-        <p>CONTROL SESSION <span>ENCRYPTED</span></p>
+        <p>CONTROL LINK <span>WEBSOCKET</span></p>
         <small className="version">ROVEROS BUILD 2.4.0</small>
       </div>
     </aside>
@@ -52,7 +52,7 @@ export function TopBar({ connected, mode, emergencyStopped, onEmergencyStop }) {
         <span className={`connection-pill ${connected ? 'is-online' : ''}`}>
           <span className="status-dot" />{connected ? 'VEHICLE CONNECTED' : 'VEHICLE OFFLINE'}
         </span>
-        <span className={`mode-pill ${mode === 'hardware' ? 'hardware' : ''}`}>{mode === 'simulation' ? 'SIMULATION' : 'HARDWARE'}</span>
+        <span className="mode-pill hardware">{mode.toUpperCase()}</span>
         <button className={`emergency-button ${emergencyStopped ? 'latched' : ''}`} onClick={onEmergencyStop} aria-label="Emergency stop vehicle">
           <span className="estop-icon">■</span><span>{emergencyStopped ? 'STOP LATCHED' : 'EMERGENCY STOP'}</span>
         </button>

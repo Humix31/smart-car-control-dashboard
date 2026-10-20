@@ -1,4 +1,3 @@
-const crypto = require('node:crypto');
 const http = require('node:http');
 const path = require('node:path');
 require('dotenv').config();
@@ -10,17 +9,14 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { serveClient: false });
 const port = Number(process.env.PORT || 3000);
-const simulationMode = process.env.SIMULATION_MODE !== 'false';
-const vehicleMode = simulationMode ? 'simulation' : 'hardware';
-const controlToken = process.env.CONTROL_TOKEN || (simulationMode ? 'local-dev-control-token' : '');
 const cameraSource = process.env.CAMERA_STREAM_URL || '';
 const cameraRoom = 'vehicle-camera';
-const stopTimeoutMs = 900;
+const stopTimeoutMs = 500;
 const robotSockets = new Set();
 const dashboardSockets = new Set();
 const state = {
   connected: false,
-  mode: vehicleMode,
+  mode: 'hardware',
   emergencyStopped: false,
   direction: 'stop',
   speed: 0,
@@ -31,23 +27,12 @@ const state = {
     currentSpeed: null,
     motorStatus: 'N/A',
     wifiSignal: null,
+    distanceCm: null,
+    obstacleDetected: null,
     latencyMs: null,
     receivedAt: null,
   },
 };
-
-if (!simulationMode && !controlToken) {
-  throw new Error('CONTROL_TOKEN must be configured when SIMULATION_MODE=false.');
-}
-if (!simulationMode && !process.env.ROBOT_TOKEN) {
-  throw new Error('ROBOT_TOKEN must be configured when SIMULATION_MODE=false.');
-}
-
-function safeEqual(left, right) {
-  const a = Buffer.from(String(left || ''));
-  const b = Buffer.from(String(right || ''));
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
 
 function log(event, details = {}) {
   console.info(JSON.stringify({ time: new Date().toISOString(), event, ...details }));
@@ -58,19 +43,25 @@ function broadcastStatus() {
 }
 
 function sendRobot(message) {
+  const serialized = JSON.stringify(message);
+  let sent = 0;
   for (const socket of robotSockets) {
-    if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+    if (socket.readyState !== WebSocket.OPEN) continue;
+    socket.send(serialized, (error) => {
+      if (error) log('controller.send-error', { message: error.message });
+    });
+    sent += 1;
   }
+  return sent;
 }
 
 function stopVehicle(reason) {
   state.direction = 'stop';
   state.speed = 0;
-  if (simulationMode) {
-    state.telemetry.currentSpeed = 0;
-    state.telemetry.motorStatus = 'Idle (simulation)';
+  for (const socket of dashboardSockets) {
+    delete socket.data.lastMovementAt;
   }
-  if (!simulationMode) sendRobot({ type: 'stop' });
+  sendRobot({ type: 'stop' });
   log('vehicle.stop', { reason });
   broadcastStatus();
 }
@@ -78,7 +69,7 @@ function stopVehicle(reason) {
 const appRoot = path.join(__dirname, 'client', 'dist');
 app.use(express.json({ limit: '32kb' }));
 app.get('/health', (_request, response) => {
-  response.json({ ok: true, mode: vehicleMode, controllerConnected: state.connected });
+  response.json({ ok: true, mode: 'hardware', controllerConnected: robotSockets.size > 0 });
 });
 app.get('/api/status', (_request, response) => {
   response.json({
@@ -88,7 +79,7 @@ app.get('/api/status', (_request, response) => {
   });
 });
 app.get('/api/camera/config', (_request, response) => {
-  response.json({ configured: Boolean(cameraSource), source: cameraSource || null });
+  response.json({ configured: Boolean(cameraSource) });
 });
 app.use(express.static(appRoot));
 app.get('*', (_request, response, next) => {
@@ -101,14 +92,6 @@ app.use((error, _request, response, _next) => {
   response.status(error.status || 500).json({ error: 'The request could not be processed.' });
 });
 
-io.use((socket, next) => {
-  if (controlToken && safeEqual(socket.handshake.auth?.token, controlToken)) {
-    socket.data.authorizedAt = Date.now();
-    return next();
-  }
-  next(new Error('Authentication required. Enter an approved control token.'));
-});
-
 io.on('connection', (socket) => {
   dashboardSockets.add(socket);
   socket.emit('vehicle:status', { ...state, telemetry: { ...state.telemetry } });
@@ -116,44 +99,46 @@ io.on('connection', (socket) => {
 
   socket.on('vehicle:connect', (...args) => {
     const acknowledge = args.find((argument) => typeof argument === 'function') || (() => {});
-    state.connected = simulationMode || robotSockets.size > 0;
-    acknowledge({ connected: state.connected, mode: vehicleMode });
+    state.connected = robotSockets.size > 0;
+    acknowledge({ connected: state.connected, mode: 'hardware' });
     broadcastStatus();
-    log('vehicle.connect', { mode: vehicleMode, connected: state.connected });
+    log('vehicle.connect', { mode: 'hardware', connected: state.connected });
   });
 
   socket.on('vehicle:disconnect', () => {
     stopVehicle('dashboard disconnected vehicle');
-    state.connected = false;
+    state.connected = robotSockets.size > 0;
     broadcastStatus();
   });
 
-  socket.on('vehicle:command', (command, acknowledge = () => {}) => {
-    const allowedDirections = new Set(['forward', 'reverse', 'left', 'right']);
-    if (!command || !allowedDirections.has(command.direction) ||
-        !Number.isInteger(command.speed) || command.speed < 1 || command.speed > 100) {
-      acknowledge({ ok: false, error: 'Invalid movement command.' });
+  socket.on('vehicle:command', (...args) => {
+    const command = args[0];
+    const acknowledge = args.find((argument) => typeof argument === 'function') || (() => {});
+    if (!command || command.type !== 'move' ||
+        !Number.isInteger(command.x) || command.x < -100 || command.x > 100 ||
+        !Number.isInteger(command.y) || command.y < -100 || command.y > 100 ||
+        !Number.isInteger(command.speed) || command.speed < 0 || command.speed > 255) {
+      acknowledge({ ok: false, error: 'Invalid movement command. Expected type=move, integer axes -100..100, and PWM speed 0..255.' });
       return;
     }
-    if (!state.connected || state.emergencyStopped || Date.now() - socket.data.authorizedAt > 15 * 60 * 1000) {
-      acknowledge({ ok: false, error: 'Vehicle is disconnected, emergency-stopped, or authorization expired.' });
+    if (command.speed === 0 || (command.x === 0 && command.y === 0)) {
+      stopVehicle('zero movement command');
+      acknowledge({ ok: true });
       return;
     }
-
-    const axes = {
-      forward: { x: 0, y: 100 },
-      reverse: { x: 0, y: -100 },
-      left: { x: -100, y: 0 },
-      right: { x: 100, y: 0 },
-    }[command.direction];
-    state.direction = command.direction;
+    if (!robotSockets.size || !state.connected || state.emergencyStopped) {
+      acknowledge({ ok: false, error: 'Vehicle is disconnected or emergency-stopped.' });
+      return;
+    }
+    const forwarded = { type: 'move', x: command.x, y: command.y, speed: command.speed };
+    if (sendRobot(forwarded) === 0) {
+      state.connected = false;
+      acknowledge({ ok: false, error: 'No connected robot WebSocket is available.' });
+      broadcastStatus();
+      return;
+    }
+    state.direction = 'move';
     state.speed = command.speed;
-    if (simulationMode) {
-      state.telemetry.currentSpeed = command.speed;
-      state.telemetry.motorStatus = 'Running (simulation)';
-    } else {
-      sendRobot({ type: 'move', ...axes, speed: Math.round(command.speed * 2.55) });
-    }
     socket.data.lastMovementAt = Date.now();
     acknowledge({ ok: true });
     broadcastStatus();
@@ -169,7 +154,9 @@ io.on('connection', (socket) => {
     log('vehicle.emergency-stop');
   });
 
-  socket.on('vehicle:reset-emergency-stop', (payload, acknowledge = () => {}) => {
+  socket.on('vehicle:reset-emergency-stop', (...args) => {
+    const payload = args[0];
+    const acknowledge = args.find((argument) => typeof argument === 'function') || (() => {});
     if (payload?.confirmed !== true || !state.connected) {
       acknowledge({ ok: false, error: 'A connected vehicle and explicit confirmation are required.' });
       return;
@@ -199,21 +186,24 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
+    const hadActiveMovement = Boolean(socket.data.lastMovementAt);
     dashboardSockets.delete(socket);
-    if (socket.data.lastMovementAt) stopVehicle('control connection lost');
-    if (dashboardSockets.size === 0 && !simulationMode) stopVehicle('last dashboard disconnected');
+    if (hadActiveMovement || dashboardSockets.size === 0) {
+      stopVehicle(hadActiveMovement ? 'control connection lost' : 'last dashboard disconnected');
+    }
   });
 });
 
 const robotServer = new WebSocket.Server({ noServer: true });
 server.on('upgrade', (request, socket, head) => {
-  if (request.url?.split('?')[0] !== '/robot') {
+  let pathname;
+  try {
+    pathname = new URL(request.url, 'http://localhost').pathname;
+  } catch {
     socket.destroy();
     return;
   }
-  if (!simulationMode && !safeEqual(new URL(request.url, 'http://localhost').searchParams.get('token'), process.env.ROBOT_TOKEN)) {
-    socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-    socket.destroy();
+  if (pathname !== '/robot') {
     return;
   }
   robotServer.handleUpgrade(request, socket, head, (websocket) => {
@@ -223,11 +213,9 @@ server.on('upgrade', (request, socket, head) => {
 
 robotServer.on('connection', (socket) => {
   robotSockets.add(socket);
-  if (robotSockets.size === 1 && !simulationMode) {
-    sendRobot({ type: 'stop' });
-    state.connected = true;
-    broadcastStatus();
-  }
+  sendRobot({ type: 'stop' });
+  state.connected = true;
+  broadcastStatus();
   log('controller.connected', { count: robotSockets.size });
 
   socket.on('message', (raw) => {
@@ -238,9 +226,6 @@ robotServer.on('connection', (socket) => {
       log('controller.invalid-json', { message: error.message });
       return;
     }
-    if (message.type === 'robot_status' && typeof message.connected === 'boolean') {
-      state.connected = simulationMode ? state.connected : message.connected;
-    }
     if (message.type === 'telemetry' || message.type === 'robot_status') {
       const fields = {
         batteryPercentage: message.batteryPercentage,
@@ -248,22 +233,37 @@ robotServer.on('connection', (socket) => {
         currentSpeed: message.currentSpeed,
         motorStatus: message.motorStatus,
         wifiSignal: message.wifiSignal,
+        distanceCm: message.distanceCm,
       };
       for (const [key, value] of Object.entries(fields)) {
         if (key === 'motorStatus' && typeof value === 'string') state.telemetry[key] = value;
         else if (typeof value === 'number' && Number.isFinite(value)) state.telemetry[key] = value;
       }
-      state.telemetry.receivedAt = new Date().toISOString();
+      if (typeof message.obstacleDetected === 'boolean') {
+        state.telemetry.obstacleDetected = message.obstacleDetected;
+      }
+      if (Object.values(fields).some((value) => value !== undefined) ||
+          typeof message.obstacleDetected === 'boolean') {
+        state.telemetry.receivedAt = new Date().toISOString();
+      }
       broadcastStatus();
     }
   });
   socket.on('close', () => {
     robotSockets.delete(socket);
-    if (robotSockets.size === 0 && !simulationMode) {
+    if (robotSockets.size === 0) {
       state.connected = false;
-      stopVehicle('vehicle controller disconnected');
-      broadcastStatus();
-    }
+    state.telemetry.batteryPercentage = null;
+    state.telemetry.batteryVoltage = null;
+    state.telemetry.currentSpeed = null;
+    state.telemetry.motorStatus = 'N/A';
+    state.telemetry.wifiSignal = null;
+    state.telemetry.distanceCm = null;
+    state.telemetry.obstacleDetected = null;
+    state.telemetry.receivedAt = null;
+    stopVehicle('vehicle controller disconnected');
+  }
+    broadcastStatus();
     log('controller.disconnected', { count: robotSockets.size });
   });
   socket.on('error', (error) => log('controller.error', { message: error.message }));
@@ -276,20 +276,10 @@ setInterval(() => {
       stopVehicle('movement dead-man timeout');
     }
   }
-}, 200);
+}, 50).unref();
 
-if (simulationMode) {
-  setInterval(() => {
-    if (!state.connected) return;
-    state.telemetry.batteryPercentage = 87;
-    state.telemetry.batteryVoltage = 7.8;
-    state.telemetry.currentSpeed = state.speed;
-    state.telemetry.motorStatus = state.direction === 'stop' ? 'Idle (simulation)' : 'Running (simulation)';
-    state.telemetry.wifiSignal = -48;
-    state.telemetry.latencyMs = Math.round(12 + Math.random() * 8);
-    state.telemetry.receivedAt = new Date().toISOString();
-    broadcastStatus();
-  }, 1500);
+if (require.main === module) {
+  server.listen(port, '0.0.0.0', () => log('server.ready', { port, mode: 'hardware' }));
 }
 
-server.listen(port, '0.0.0.0', () => log('server.ready', { port, mode: vehicleMode }));
+module.exports = { app, io, server, state, robotSockets, dashboardSockets };

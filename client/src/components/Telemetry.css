@@ -1,0 +1,8 @@
+.obstacle-warning {
+  padding: 9px 14px;
+  border-bottom: 1px solid #703438;
+  background: #321b1d;
+  color: #ffb1a7;
+  font: 700 9px 'DM Mono', monospace;
+  letter-spacing: .08em;
+}
