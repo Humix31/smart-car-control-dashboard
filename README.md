@@ -90,7 +90,7 @@ Dashboard commands are plain JSON WebSocket text frames:
 {"command":"status"}
 ```
 
-The dashboard's movement-vector controls are translated to one cardinal direction, with a 0–100 integer speed message sent when the selected speed changes. The ESP32 should report current state as:
+The dashboard scales speed by joystick displacement up to the selected 0–100% maximum. The backend translates each movement update into one atomic direction-and-speed JSON frame, for example `{"command":"forward","speed":40}`. The ESP32 must apply that speed to its ENA/ENB PWM outputs when processing the frame. The ESP32 should report current state as:
 
 ```json
 {"type":"status","connected":true,"speed":70,"obstacle":false,"vacuum":false}

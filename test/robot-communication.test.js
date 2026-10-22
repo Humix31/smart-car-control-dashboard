@@ -213,13 +213,17 @@ test('the /ws command/status protocol reports genuine status and forwards contro
     assert.deepEqual(await emitWithAck(dashboard, 'vehicle:speed', 55), { ok: true });
     assert.deepEqual(await speedMessage, { command: 'speed', speed: 55 });
 
-    const speedDuringMove = nextRobotMessage(robot, (message) => message.command === 'speed');
     const moveMessage = nextRobotMessage(robot, (message) => message.command === 'forward');
     assert.deepEqual(await emitWithAck(dashboard, 'vehicle:command', {
       type: 'move', x: 0, y: 100, speed: 158,
     }), { ok: true });
-    assert.deepEqual(await speedDuringMove, { command: 'speed', speed: 62 });
-    assert.deepEqual(await moveMessage, { command: 'forward' });
+    assert.deepEqual(await moveMessage, { command: 'forward', speed: 62 });
+
+    const slowMoveMessage = nextRobotMessage(robot, (message) => message.command === 'forward');
+    assert.deepEqual(await emitWithAck(dashboard, 'vehicle:command', {
+      type: 'move', x: 0, y: 100, speed: 102,
+    }), { ok: true });
+    assert.deepEqual(await slowMoveMessage, { command: 'forward', speed: 40 });
 
     const obstacleStatus = waitForStatus(dashboard, (status) => status.telemetry.obstacleDetected === true);
     robot.send(JSON.stringify({ type: 'status', connected: true, speed: 62, obstacle: true, vacuum: false }));
@@ -241,7 +245,7 @@ test('the /ws command/status protocol reports genuine status and forwards contro
     assert.deepEqual(await emitWithAck(dashboard, 'vehicle:command', {
       type: 'move', x: 0, y: -100, speed: 158,
     }), { ok: true });
-    assert.deepEqual(await backwardMessage, { command: 'backward' });
+    assert.deepEqual(await backwardMessage, { command: 'backward', speed: 62 });
 
     const safetyStop = nextRobotMessage(robot, (message) => message.command === 'stop');
     const disconnectedStatus = waitForStatus(dashboard, (status) => !status.connected && status.telemetry.obstacleDetected === false);

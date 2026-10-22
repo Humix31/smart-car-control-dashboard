@@ -24,6 +24,11 @@ function now() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+function movementSpeedPercent(movement, maximumSpeed) {
+  const displacement = Math.min(100, Math.hypot(movement.x, movement.y));
+  return Math.round(maximumSpeed * displacement / 100);
+}
+
 export default function App() {
   const [activeSection, setActiveSection] = useState('Dashboard');
   const [socket, setSocket] = useState(null);
@@ -134,7 +139,7 @@ export default function App() {
         type: 'move',
         x: movement.x,
         y: movement.y,
-        speed: Math.round(speedRef.current * 2.55),
+        speed: Math.round(movementSpeedPercent(movement, speedRef.current) * 2.55),
       }, (result) => {
         if (!result?.ok) {
           stopMovement();
@@ -166,7 +171,17 @@ export default function App() {
   function changeSpeed(value) {
     setSpeed(value);
     if (socketRef.current?.connected && vehicleConnected) {
-      socketRef.current.emit('vehicle:speed', value, (result) => {
+      const movement = movementRef.current;
+      const event = movement && value > 0 ? 'vehicle:command' : 'vehicle:speed';
+      const payload = movement && value > 0
+        ? {
+            type: 'move',
+            x: movement.x,
+            y: movement.y,
+            speed: Math.round(movementSpeedPercent(movement, value) * 2.55),
+          }
+        : value;
+      socketRef.current.emit(event, payload, (result) => {
         if (!result?.ok) {
           const message = result?.error || 'Speed command was rejected.';
           setConnectionError(message);

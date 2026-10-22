@@ -67,17 +67,11 @@ function sendMovement(command) {
   for (const socket of robotSockets) {
     if (socket.readyState !== WebSocket.OPEN) continue;
     if (socket.controllerProtocol === 'command-json') {
-      if (socket.selectedSpeed !== percentSpeed) {
-        const speedMessage = JSON.stringify({ command: 'speed', speed: percentSpeed });
-        socket.send(speedMessage, (error) => {
-          if (error) log('controller.send-error', { message: error.message });
-        });
-        socket.selectedSpeed = percentSpeed;
-      }
-      const directionMessage = JSON.stringify({ command: direction });
-      socket.send(directionMessage, (error) => {
+      const movementMessage = JSON.stringify({ command: direction, speed: percentSpeed });
+      socket.send(movementMessage, (error) => {
         if (error) log('controller.send-error', { message: error.message });
       });
+      socket.selectedSpeed = percentSpeed;
       continue;
     }
     const movementMessage = JSON.stringify(command);
