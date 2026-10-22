@@ -1,15 +1,10 @@
 # Smart Car Control Dashboard
 
-A responsive React dashboard with an Express/Socket.IO control service, an ESP32-compatible WebSocket adapter, an explicit simulation mode, WebRTC camera signaling, and movement safety timeouts.
+A React dashboard and Express service for an ESP32 inspection rover. The browser and ESP32 use one regular WebSocket endpoint at `/ws`; the server forwards validated JSON commands and relays ESP32 status. Camera streaming remains a separate, browser-to-camera connection.
 
-## Requirements
+## Run locally
 
-- Node.js 18.18 or newer and npm
-- A modern browser
-
-## Run locally in simulation
-
-From the repository root in the VS Code terminal (PowerShell):
+Requirements: Node.js 18.18+ and npm.
 
 ```powershell
 npm install
@@ -17,91 +12,81 @@ Copy-Item .env.example .env
 npm run dev
 ```
 
-Open **http://localhost:5173**. Local development pre-fills the sample simulation token. The Vite UI runs on port 5173 and proxies API and Socket.IO traffic to the Express service on port 3000. In simulation, status telemetry is explicitly marked as simulated. Camera video stays unavailable until a camera is configured or demo video mode is explicitly enabled.
+Open **http://localhost:5173**. The sample environment enables an explicitly labelled local simulation. For real hardware, set `SIMULATION_MODE=false` and set a unique `CONTROL_TOKEN` in `.env`, then restart. The dashboard's vehicle status stays offline until the ESP32 reports `connected: true`.
 
-To build and serve the production frontend locally:
+Production build and server:
 
 ```powershell
 npm run build
 npm start
 ```
 
-Open **http://localhost:3000**. `npm start` serves the built app and the API from the same origin.
+The Express server listens on `process.env.PORT` (default `3000`) and serves the built client and WebSocket endpoint on the same origin.
 
-## Configuration
+## ESP32 WebSocket protocol
 
-Copy `.env.example` to `.env` and set values before starting the server:
+Connect the ESP32 to:
+
+```text
+wss://smart-car-control-dashboard.onrender.com/ws
+```
+
+Use `ws://<computer-on-the-same-network>:3000/ws` for local development. In simulation mode, hardware/controller WebSocket connections are rejected. The `/ws` connection is a regular WebSocket, not Socket.IO. Render terminates TLS, so public clients use WSS.
+
+Dashboard commands forwarded to the ESP32 use these exact JSON shapes:
+
+```json
+{"command":"forward"}
+{"command":"backward"}
+{"command":"left"}
+{"command":"right"}
+{"command":"stop"}
+{"command":"speed","speed":70}
+{"command":"vacuum_on"}
+{"command":"vacuum_off"}
+{"command":"status"}
+```
+
+`speed` is an integer from 0 to 100. The dashboard sends a direction while a button/key is held, repeats it as a movement lease, and sends `stop` on release, focus loss, or connection loss. The server sends `stop` if movement commands stop arriving for 900 ms. It also stops on dashboard or controller disconnect. The dashboard's operator WebSocket uses `?role=dashboard&token=...`; the ESP32 connects to the plain `/ws` path.
+
+The ESP32 should report state using:
+
+```json
+{"type":"status","connected":true,"speed":70,"obstacle":false,"vacuum":false}
+```
+
+The dashboard considers the rover connected only after this report. `obstacle: true` is shown as an obstacle warning within 20 cm; `false` is shown as clear; a missing/stale reading is shown as unavailable. Obstacle status never changes movement commands. Vacuum state is displayed only from the ESP32 report. The speed slider shows the selected speed; telemetry separately labels the ESP32-reported speed setting.
+
+### Firmware responsibilities
+
+This repository contains dashboard/server code only; there is no ESP32 firmware sketch to edit or verify. The firmware must apply the received speed to PWM on L298N `ENA` (GPIO 25) and `ENB` (GPIO 33), drive direction using `IN1` GPIO 26, `IN2` GPIO 27, `IN3` GPIO 14, and `IN4` GPIO 13, and control the vacuum relay on GPIO 23. The ultrasonic sensor uses `TRIG` GPIO 5 and `ECHO` GPIO 18. Firmware must send the status schema above and implement its own motor watchdog so the rover stops if its WebSocket/server link fails; the server-side dead-man cannot stop motors after the ESP32 itself has lost the server connection. Test motor direction, PWM mapping, relay polarity, sensor threshold, and watchdog behavior with wheels raised and the physical power cutoff accessible.
+
+The ESP32 endpoint does not require a device token so it matches the specified `/ws` firmware URL and message contract. `CONTROL_TOKEN` continues to protect dashboard/operator connections. Restrict public access to the service where practical.
+
+## Dashboard settings
 
 | Variable | Purpose |
 | --- | --- |
-| `PORT` | HTTP/WebSocket server port (defaults to `3000`). |
-| `SIMULATION_MODE` | `true` (default) isolates controls from physical hardware. Set `false` only after bench testing. |
-| `CONTROL_TOKEN` | Shared approved-user token required to open a dashboard Socket.IO session. Set a long, unique secret for any deployment. |
-| `ROBOT_TOKEN` | Required in hardware mode; authenticate the vehicle's `/robot?token=...` WebSocket connection. |
-| `CAMERA_STREAM_URL` | Optional camera/bridge identifier included in signaling. Configure a WebRTC-capable camera bridge; this value alone is not a video stream. |
-| `VITE_DEMO_MODE` | Set to `true` at frontend build time to enable an explicitly labeled demo video. |
-| `VITE_DEMO_VIDEO_URL` | Optional URL of the demo video; no demo video is shown when it is unset. |
-| `VITE_ICE_SERVERS` | Optional JSON array of your own STUN/TURN server configurations, read during frontend build. |
+| `PORT` | HTTP/WebSocket port; Render supplies this automatically. |
+| `SIMULATION_MODE` | `true` only for explicitly labelled local simulation; set `false` for the rover. |
+| `CONTROL_TOKEN` | Required operator token. The local example token is not suitable for deployment. |
+| `VITE_CAMERA_STREAM_URL` | Optional browser-accessible camera stream URL, read when the client is built. |
 
-Never commit `.env`, put a long-lived control token in `VITE_*` variables, or expose the hardware service publicly without TLS, network restrictions/VPN, and unique secrets. The sample control token is only for local simulation; replace it before deployment.
+The camera default remains configured in [`client/src/config/camera.js`](client/src/config/camera.js) and uses the ESP32-CAM MJPEG endpoint `/stream` on port `81`. Set `VITE_CAMERA_STREAM_URL` in the build environment to override it without editing source. The browser connects directly to this URL: Render cannot route to a private camera IP. HTTPS dashboards may block an HTTP stream as mixed content; for remote camera viewing, configure a browser-accessible HTTPS stream/relay or use the dashboard on the camera's local network over HTTP. Do not place Wi-Fi passwords or private credentials in frontend variables or stream URLs.
 
-## Real vehicle controller
+## Deploy to Render
 
-The server defaults to simulation. To enable hardware, configure `SIMULATION_MODE=false`, a strong `CONTROL_TOKEN`, and a separate strong `ROBOT_TOKEN`, then restart. The server refuses to start in hardware mode if either token is missing. Keep the server on a trusted network or behind a VPN and TLS-terminating reverse proxy.
+The existing [`render.yaml`](render.yaml) builds the client and starts the Node server. Deploy the repository through Render's existing Web Service, then set the `CONTROL_TOKEN` secret when prompted (or in the service's Environment settings) to a long, unique value. Keep `SIMULATION_MODE=false`. Render provides `PORT`; the server accepts HTTPS/WSS upgrades through Render's TLS proxy. Set `VITE_CAMERA_STREAM_URL` as a build environment variable only if you have a browser-reachable stream URL. Redeploy after changing build-time camera configuration.
 
-The raw WebSocket controller adapter retains the repository's existing ESP32 wire format:
+No deployment is performed by this repository change. Verify Render's deploy log and `/health`, then verify the operator dashboard reports **ESP32 offline** until the board's `/ws` connection and status report are received.
 
-```json
-{"type":"move","x":0,"y":100,"speed":128}
-{"type":"stop"}
-```
+## Safe test sequence
 
-Axes are `-100..100`; speed is PWM `0..255`. The web dashboard uses a single held direction at a time and maps its 0–100% speed setting to PWM. Connect the ESP32 to:
+1. With drive power disconnected or wheels raised, build locally with `npm run build` and run `npm start`.
+2. Set `SIMULATION_MODE=false` and a local `CONTROL_TOKEN`. Connect the dashboard and ESP32 to the same server; verify the UI remains offline until a status report with `connected:true` arrives.
+3. Confirm STOP works before testing each direction at low selected speed. Confirm speed reports and firmware PWM on both enable pins.
+4. Test `obstacle:true` and `obstacle:false` reports; verify the warning changes only and does not steer or stop the rover.
+5. Test vacuum commands and verify the UI changes only after the ESP32 reports its relay state.
+6. Disconnect the dashboard and then the ESP32 separately. Verify the server sends STOP when it can and the firmware watchdog stops the motors when the controller link is lost. Keep the physical cutoff within reach.
 
-```text
-ws://<trusted-server-host>:3000/robot?token=<ROBOT_TOKEN>
-```
-
-Use `wss://` behind TLS for remote networks. On connect, a stop is sent before the controller is reported ready. Implement a firmware-side motor watchdog that stops the motors if commands stop arriving; the server also stops after a 900 ms movement-command dead-man timeout and when the dashboard control link is lost. Validate axis and PWM limits, motor direction, and watchdog behavior with wheels raised and power readily accessible before any driving test.
-
-Controller telemetry may be sent in a `telemetry` or `robot_status` WebSocket message with numeric `batteryPercentage`, `batteryVoltage`, `currentSpeed`, and `wifiSignal` fields and/or a string `motorStatus`. Missing sensor readings are displayed as **N/A**. The existing controller protocol's `robot_status` connection message remains supported.
-
-## ESP32-CAM stream
-
-The dashboard displays the camera's actual MJPEG stream in the camera panel. Set the camera's IP address once in `client/src/config/camera.js`; the configured URL is built as `http://<ESP32_CAM_IP>:81/stream`. Change only `ESP32_CAM_IP` when the camera's address changes. This endpoint must match the stream route enabled by your ESP32-CAM firmware.
-
-The dashboard prioritizes the stream request and retries failed or stalled connections sooner. Actual frame rate and image size are controlled by the ESP32-CAM firmware and available Wi-Fi bandwidth; CSS or browser settings cannot make the camera capture frames faster. To tune those safely, use the exact camera sketch and test reduced frame resolution/JPEG quality with the motors operating. No camera firmware is included in this repository.
-
-The browser connects directly to the camera, so test the stream from the same device and network as the dashboard by opening `http://<ESP32_CAM_IP>:81/stream`. A private address such as `10.x.x.x`, `172.16-31.x.x`, or `192.168.x.x` is only reachable from a network with a route to the camera (typically the same Wi-Fi or a VPN); deploying the dashboard to Render does not make a private camera reachable. In addition, browsers can block an HTTP camera stream when embedded in the HTTPS Render dashboard as mixed content. For remote viewing, use a properly secured HTTPS streaming relay or VPN and configure the browser-accessible stream URL; do not expose the camera's raw stream publicly.
-
-The camera panel reports connecting, connected, unavailable, and reconnecting states. It retries after stream errors with increasing delays and does not reload a stream that remains connected. No camera firmware or GPIO wiring changes are made by this dashboard integration.
-
-## Controls and safety
-
-- Hold W/A/S/D or the directional buttons to move; releasing stops. Space stops immediately.
-- The browser also sends stop on focus loss. Reconnection never resumes movement.
-- The server validates directions and speed, enforces a 900 ms command dead-man timeout, and latches emergency stop until explicitly confirmed reset.
-- Reset the latch only after confirming the physical vehicle is safe and any hardware cutoff has been released.
-- A software emergency stop cannot stop a vehicle when its network/controller is unavailable. It is **not a substitute for an independent, hardware-level emergency stop**. Keep the physical power cutoff accessible and implement motor-driver/firmware failsafes.
-- Hardware use requires an approved control token and a separate robot token. Protect all hardware deployments with TLS and private network controls.
-
-## API and diagnostics
-
-- `GET /health` — process and operating mode health.
-- `GET /api/status` — current vehicle state and available telemetry.
-- `GET /api/camera/config` — whether a camera source is configured (does not reveal it).
-- Socket.IO events include `vehicle:connect`, `vehicle:disconnect`, `vehicle:command`, `vehicle:stop`, `vehicle:emergency-stop`, `vehicle:status`, and `camera:status`.
-
-Check the server terminal for structured JSON connection and stop events. If Vite loads but the session cannot connect, confirm the server is running on port 3000, the token matches, and no other service occupies that port. If the vehicle stays offline in hardware mode, check the ESP32 URL/token, network reachability, and server logs. If video does not appear, verify camera peer signaling, permissions, ICE/TURN reachability, and browser console errors.
-
-## Project structure
-
-```text
-client/
-  src/components/   Dashboard, camera, controls, telemetry, and settings UI
-  src/App.jsx       Socket.IO session and dashboard behavior
-  src/styles.css    Responsive dark dashboard styling
-server.js           Express, Socket.IO, simulation, and ESP32 WebSocket adapter
-.env.example        Local and hardware configuration template
-render.yaml         Production build/start commands
-```
+An emergency-stop button in the dashboard is a software stop and cannot stop an unreachable rover. It is not a replacement for an independent hardware cutoff.

@@ -18,7 +18,7 @@ export function ConnectionStatus({ connected, latency }) {
 export function TelemetryPanel({ telemetry, connected, cameraConnected }) {
   const entries = [
     { label: 'Battery voltage', value: typeof telemetry.batteryVoltage === 'number' ? `${telemetry.batteryVoltage.toFixed(1)} V` : 'N/A', icon: Battery },
-    { label: 'Current speed', value: typeof telemetry.currentSpeed === 'number' ? `${telemetry.currentSpeed}%` : 'N/A', icon: Gauge },
+    { label: 'ESP32 reported speed', value: typeof telemetry.currentSpeed === 'number' ? `${telemetry.currentSpeed}%` : 'N/A', icon: Gauge },
     { label: 'Wi-Fi signal', value: typeof telemetry.wifiSignal === 'number' ? `${telemetry.wifiSignal} dBm` : 'N/A', icon: Wifi },
     { label: 'Motor status', value: telemetry.motorStatus || 'N/A', icon: Radio },
     { label: 'Camera status', value: cameraConnected ? 'Streaming' : 'N/A', icon: Radio },

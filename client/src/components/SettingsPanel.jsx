@@ -15,7 +15,7 @@ export function SettingsPanel({ mode, cameraConfigured, onTokenChange, token }) 
         <label className="remember-token"><input type="checkbox" checked={remember} onChange={(event) => { setRemember(event.target.checked); if (!event.target.checked) localStorage.removeItem('rover-control-token'); else if (token) localStorage.setItem('rover-control-token', token); }} /> Remember token on this device</label>
         <div className="setting-summary"><span>Controller mode</span><b>{mode.toUpperCase()}</b></div>
         <div className="setting-summary"><span>Camera source</span><b>{cameraConfigured ? 'CONFIGURED' : 'NOT CONFIGURED'}</b></div>
-        <p className="setting-warning">Never expose a hardware controller directly to the public internet. Use TLS, a private network or VPN, and unique control and robot tokens.</p>
+        <p className="setting-warning">The dashboard control token protects operator access. The ESP32 WebSocket protocol has no device-token field; use TLS and restrict access to the service where practical.</p>
       </div>
     </section>
   );

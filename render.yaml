@@ -5,3 +5,10 @@ services:
     plan: free
     buildCommand: npm install && npm run build
     startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SIMULATION_MODE
+        value: "false"
+      - key: CONTROL_TOKEN
+        sync: false

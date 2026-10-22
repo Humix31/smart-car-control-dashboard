@@ -3,7 +3,7 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CircleStop } from 'lucide-re
 const controls = [
   { direction: 'forward', label: 'Forward', key: 'W', icon: ArrowUp, className: 'up' },
   { direction: 'left', label: 'Turn left', key: 'A', icon: ArrowLeft, className: 'left' },
-  { direction: 'reverse', label: 'Reverse', key: 'S', icon: ArrowDown, className: 'down' },
+  { direction: 'backward', label: 'Backward', key: 'S', icon: ArrowDown, className: 'down' },
   { direction: 'right', label: 'Turn right', key: 'D', icon: ArrowRight, className: 'right' },
 ];
 
@@ -32,8 +32,8 @@ export function DirectionalControls({ enabled, activeDirection, onStart, onStop 
 export function SpeedSlider({ value, onChange, disabled }) {
   return (
     <section className="speed-setting">
-      <div className="section-heading"><span>MAX SPEED</span><strong>{value}<small>%</small></strong></div>
-      <input type="range" min="0" max="100" step="1" value={value} disabled={disabled} onChange={(event) => onChange(Number(event.target.value))} aria-label="Maximum speed percentage" />
+      <div className="section-heading"><span>SELECTED SPEED</span><strong>{value}<small>%</small></strong></div>
+      <input type="range" min="0" max="100" step="1" value={value} disabled={disabled} onChange={(event) => onChange(Number(event.target.value))} aria-label="Selected speed percentage" />
       <div className="range-labels"><span>PRECISE</span><span>FULL POWER</span></div>
     </section>
   );

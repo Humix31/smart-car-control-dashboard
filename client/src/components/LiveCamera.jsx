@@ -12,6 +12,7 @@ export function LiveCamera({ onStatusChange }) {
   const hasConnectedRef = useRef(false);
   const [status, setStatus] = useState('connecting');
   const [connectionHint, setConnectionHint] = useState('');
+  const [cameraActionError, setCameraActionError] = useState('');
   const [retryKey, setRetryKey] = useState(0);
   const [timestamp, setTimestamp] = useState('--:--:--');
 
@@ -86,11 +87,12 @@ export function LiveCamera({ onStatusChange }) {
 
   async function fullscreen() {
     try {
+      setCameraActionError('');
       if (!document.fullscreenElement) await viewportRef.current?.requestFullscreen();
       else await document.exitFullscreen();
     } catch (error) {
-      setStatus(hasConnectedRef.current ? 'connected' : 'unavailable');
       console.error('Camera fullscreen request failed:', error);
+      setCameraActionError('Fullscreen is unavailable in this browser or context.');
     }
   }
 
@@ -135,6 +137,7 @@ export function LiveCamera({ onStatusChange }) {
           </div>
         )}
         {connected && <div className="recording-indicator"><Radio size={12} /> LIVE</div>}
+        {cameraActionError && <div className="camera-error" role="alert"><span>{cameraActionError}</span><button onClick={() => setCameraActionError('')} aria-label="Dismiss camera error">×</button></div>}
         <span className="camera-time">{timestamp}</span>
         <span className="camera-label">CAM-01 <i /> ESP32-CAM</span>
       </div>
