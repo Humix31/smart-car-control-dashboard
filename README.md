@@ -1,6 +1,6 @@
 # Smart Car Control Dashboard
 
-The existing React/Vite dashboard communicates with the Express backend over Socket.IO. The backend talks to the ESP32 over a separate, native WebSocket connection at `/robot`. These protocols are not interchangeable: Socket.IO is used only between the browser and server, and plain WebSocket JSON is used between the server and ESP32.
+The existing React/Vite dashboard communicates with the Express backend over Socket.IO. The backend supports native WebSocket JSON on both `/robot` (the repository's existing vector protocol) and `/ws` (the command/status protocol described below). These protocols are not interchangeable: Socket.IO is used only between the browser and server.
 
 ## Run locally
 
@@ -48,7 +48,7 @@ The backend validates that payload and forwards the **same JSON object**, unchan
 
 The ESP32 must parse these messages and implement the axes/speed-to-motors mapping in its existing firmware. The working Arduino sketch is not present in this repository, so compatibility of its parser and motor behavior is **not yet confirmed**. No GPIO assignments or firmware implementation have been invented here.
 
-The backend stops sending movement and sends `{"type":"stop"}` when it has received no refreshed movement command for 500 ms. It also sends stop when the dashboard control socket or robot WebSocket closes. A server cannot deliver a stop over a broken network: a firmware-side motor watchdog and independent hardware emergency stop are still essential. A newly connected robot receives stop immediately; movement is never resumed automatically. Emergency stop remains latched until the connected vehicle is stopped and a user confirms reset.
+The backend stops sending movement and sends the protocol-appropriate STOP when it has received no refreshed movement command for 500 ms. It also sends stop when the dashboard control socket or robot WebSocket closes. A server cannot deliver a stop over a broken network: a firmware-side motor watchdog and independent hardware emergency stop are still essential. A newly connected robot receives stop immediately; movement is never resumed automatically. Emergency stop remains latched until the connected vehicle is stopped and a user confirms reset.
 
 ### ESP32 connection and telemetry
 
@@ -66,7 +66,39 @@ ws://<computer-on-the-same-network>:3000/robot
 
 The backend requires no application control or robot token. Any reachable client can therefore send control commands or connect as a robot. **Do not use this public endpoint on an unrestricted network.** Restrict access with a private deployment/network/VPN or other network-layer controls before connecting a powered vehicle. TLS (`wss://`) encrypts traffic but does not authorize users.
 
-The backend accepts actual sensor data sent by the ESP32 as `telemetry` or `robot_status` JSON. Recognized optional fields are:
+### Command/status WebSocket at `/ws`
+
+Use this path when the ESP32 firmware expects JSON commands rather than movement vectors:
+
+```text
+wss://smart-car-control-dashboard.onrender.com/ws
+```
+
+For local development, use `ws://<computer-on-the-same-network>:3000/ws`. After the standard WebSocket upgrade, the server requests status with `{"command":"status"}`. The controller is reported online only after it responds with a valid `type:"status"` message containing a boolean `connected` value; opening the socket alone does not show the rover as online.
+
+Dashboard commands are plain JSON WebSocket text frames:
+
+```json
+{"command":"forward"}
+{"command":"backward"}
+{"command":"left"}
+{"command":"right"}
+{"command":"stop"}
+{"command":"speed","speed":70}
+{"command":"vacuum_on"}
+{"command":"vacuum_off"}
+{"command":"status"}
+```
+
+The dashboard's movement-vector controls are translated to one cardinal direction, with a 0–100 integer speed message sent when the selected speed changes. The ESP32 should report current state as:
+
+```json
+{"type":"status","connected":true,"speed":70,"obstacle":false,"vacuum":false}
+```
+
+Only reported booleans update the obstacle and vacuum indicators. The obstacle state is warning-only and never changes movement commands. The repository does not contain the uploaded ESP32 sketch, so this documents the requested `/ws` wire contract; it cannot verify that the hardware firmware currently implements it.
+
+On `/robot`, the backend accepts actual sensor data sent by the ESP32 as `telemetry` or `robot_status` JSON. Recognized optional fields are:
 
 ```json
 {
@@ -90,7 +122,7 @@ Simulation behavior and fabricated sensor values have been removed. `SIMULATION_
 Keep the existing Render service. It should build using `npm install && npm run build`, start with `npm start`, and bind to Render's `PORT` environment variable. Render HTTPS terminates TLS; the browser connects to same-origin Socket.IO, and the ESP32 uses `wss://.../robot`. After pushing, deploy the latest commit to the existing service and verify:
 
 - `GET /health` reports `{"ok":true,"mode":"hardware","controllerConnected":false}` before the ESP32 connects.
-- The same endpoint reports `controllerConnected:true` only while its `/robot` WebSocket is open.
+- The same endpoint reports `controllerConnected:true` only after an ESP32 sends a valid online status or telemetry message on `/robot` or `/ws`.
 - The server log records `controller.connected` and `controller.disconnected`.
 - `GET /api/status` contains actual received telemetry or `null`/`N/A`.
 

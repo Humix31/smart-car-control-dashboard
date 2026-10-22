@@ -6,3 +6,9 @@
   font: 700 9px 'DM Mono', monospace;
   letter-spacing: .08em;
 }
+
+.obstacle-warning.obstacle-clear {
+  border-color: #344333;
+  background: #172019;
+  color: #a8df8c;
+}

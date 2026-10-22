@@ -29,7 +29,11 @@ export function TelemetryPanel({ telemetry, connected, cameraConnected }) {
   return (
     <section className="panel telemetry-panel" id="telemetry">
       <div className="panel-heading"><div><div className="eyebrow">VEHICLE HEALTH</div><h2>Telemetry</h2></div><span className="telemetry-live"><i />{connected ? 'LIVE UPDATES' : 'WAITING FOR VEHICLE'}</span></div>
-      {telemetry.obstacleDetected === true && <div className="obstacle-warning" role="alert">OBSTACLE DETECTED{typeof telemetry.distanceCm === 'number' ? ` · ${telemetry.distanceCm.toFixed(1)} CM` : ''}</div>}
+      <div className={`obstacle-warning ${telemetry.obstacleDetected === false ? 'obstacle-clear' : ''}`} role="status">
+        {telemetry.obstacleDetected === true
+          ? `OBSTACLE DETECTED${typeof telemetry.distanceCm === 'number' ? ` · ${telemetry.distanceCm.toFixed(1)} CM` : ''}`
+          : telemetry.obstacleDetected === false ? 'ULTRASONIC SENSOR CLEAR' : 'ULTRASONIC SENSOR UNAVAILABLE'}
+      </div>
       <div className="telemetry-grid">{entries.map(({ label, value, icon: Icon }) => <div className="telemetry-item" key={label}><span className="telemetry-item-icon"><Icon size={16} /></span><span><small>{label}</small><b>{value}</b></span></div>)}</div>
     </section>
   );

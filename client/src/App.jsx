@@ -6,6 +6,7 @@ import { DirectionalControls, EmergencyStopButton, SpeedSlider } from './compone
 import { LiveCamera } from './components/LiveCamera.jsx';
 import { BatteryIndicator, ConnectionStatus, EventLog, TelemetryPanel } from './components/Telemetry.jsx';
 import { SettingsPanel } from './components/SettingsPanel.jsx';
+import './components/VacuumControls.css';
 
 const initialTelemetry = {
   batteryPercentage: null,
@@ -31,6 +32,7 @@ export default function App() {
   const [connectionError, setConnectionError] = useState('');
   const [mode, setMode] = useState('hardware');
   const [telemetry, setTelemetry] = useState(initialTelemetry);
+  const [vacuumState, setVacuumState] = useState(null);
   const [cameraConnected, setCameraConnected] = useState(false);
   const [cameraConfigured, setCameraConfigured] = useState(false);
   const [speed, setSpeed] = useState(50);
@@ -83,13 +85,22 @@ export default function App() {
       if (movementIntervalRef.current) window.clearInterval(movementIntervalRef.current);
       movementIntervalRef.current = null;
       setTelemetry(initialTelemetry);
+      setVacuumState(null);
       if (reason !== 'io client disconnect') pushEvent('Control connection lost. Vehicle movement has been stopped.', 'error');
     });
     connection.on('vehicle:status', (status) => {
-      setVehicleConnected(Boolean(status.connected));
+      const connected = Boolean(status.connected);
+      setVehicleConnected(connected);
+      if (!connected) {
+        setActiveDirection('');
+        movementRef.current = null;
+        if (movementIntervalRef.current) window.clearInterval(movementIntervalRef.current);
+        movementIntervalRef.current = null;
+      }
       setEmergencyStopped(Boolean(status.emergencyStopped));
       setMode(status.mode || 'hardware');
       setTelemetry(status.telemetry || initialTelemetry);
+      setVacuumState(typeof status.vacuum === 'boolean' ? status.vacuum : null);
     });
     connection.on('camera:status', (status) => setCameraConnected(Boolean(status.connected)));
     connection.connect();
@@ -154,10 +165,31 @@ export default function App() {
 
   function changeSpeed(value) {
     setSpeed(value);
-    if (value === 0) {
-      stopMovement();
-      socketRef.current?.emit('vehicle:stop');
+    if (socketRef.current?.connected && vehicleConnected) {
+      socketRef.current.emit('vehicle:speed', value, (result) => {
+        if (!result?.ok) {
+          const message = result?.error || 'Speed command was rejected.';
+          setConnectionError(message);
+          pushEvent(message, 'error');
+        }
+      });
     }
+    if (value === 0) {
+      const wasMoving = Boolean(movementRef.current);
+      stopMovement();
+      if (!wasMoving) socketRef.current?.emit('vehicle:stop');
+    }
+  }
+
+  function setVacuum(command) {
+    if (!socketRef.current?.connected || !vehicleConnected) return;
+    socketRef.current.emit('vehicle:vacuum', command, (result) => {
+      if (!result?.ok) {
+        const message = result?.error || 'Vacuum command was rejected.';
+        setConnectionError(message);
+        pushEvent(message, 'error');
+      }
+    });
   }
 
   useEffect(() => {
@@ -227,8 +259,6 @@ export default function App() {
 
   const movementEnabled = socketConnected && vehicleConnected && !emergencyStopped;
   const cameraSourceLabel = import.meta.env.VITE_DEMO_MODE === 'true' ? 'DEMO SOURCE' : cameraConfigured ? 'CAMERA READY' : 'NO SOURCE';
-  const displayedSpeed = movementRef.current ? Math.round(speedRef.current) : 0;
-
   return (
     <DashboardLayout activeSection={activeSection} onNavigate={navigate}>
       <TopBar connected={vehicleConnected} mode={mode} emergencyStopped={emergencyStopped} onEmergencyStop={emergencyStopped ? clearEmergencyStop : emergencyStop} />
@@ -240,7 +270,7 @@ export default function App() {
         {connectionError && <div className="error-banner" role="alert"><AlertTriangle size={16} /><span>{connectionError}</span><button onClick={() => setConnectionError('')} aria-label="Dismiss error">×</button></div>}
         {emergencyStopped && <div className="latched-banner"><AlertTriangle size={16} /><span><b>EMERGENCY STOP LATCHED</b> — reset only after physically confirming the vehicle is safe.</span><button onClick={clearEmergencyStop}>CONFIRM RESET</button></div>}
         <section className="metrics-row" aria-label="Vehicle status">
-          <div className="metric-card"><span className="metric-icon lime"><CarFront size={18} /></span><span><small>VEHICLE STATUS</small><b>{vehicleConnected ? 'Ready' : 'Offline'}</b></span><i className={vehicleConnected ? 'metric-online' : ''} /></div>
+          <div className="metric-card"><span className="metric-icon lime"><CarFront size={18} /></span><span><small>VEHICLE STATUS</small><b>{vehicleConnected ? 'Vehicle Online' : 'Vehicle Offline'}</b></span><i className={vehicleConnected ? 'metric-online' : ''} /></div>
           <div className="metric-card"><span className="metric-icon blue"><BatteryIndicator percentage={telemetry.batteryPercentage} /></span><span><small>BATTERY LEVEL</small><b>{typeof telemetry.batteryPercentage === 'number' ? `${Math.round(telemetry.batteryPercentage)}%` : 'N/A'}</b></span></div>
           <ConnectionStatus connected={socketConnected} latency={telemetry.latencyMs} />
           <div className="metric-card"><span className="metric-icon purple"><Signal size={17} /></span><span><small>CAMERA</small><b>{cameraConnected ? 'Streaming' : cameraSourceLabel}</b></span><i className={cameraConnected ? 'metric-online' : ''} /></div>
@@ -258,9 +288,16 @@ export default function App() {
                 <div className="control-help"><span>PRESS & HOLD TO MOVE</span><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span></div>
                 <DirectionalControls enabled={movementEnabled && speed > 0} activeDirection={activeDirection} onStart={startMovement} onMove={updateMovement} onStop={stopMovement} />
                 <SpeedSlider value={speed} onChange={changeSpeed} disabled={!vehicleConnected} />
-                <div className="control-readout"><span><i className="tiny-car"><CarFront size={15} /></i> COMMAND OUTPUT</span><b>{displayedSpeed}<small> %</small></b></div>
+                <div className="control-readout"><span><i className="tiny-car"><CarFront size={15} /></i> SELECTED SPEED</span><b>{speed}<small> %</small></b></div>
                 <div className="control-quick-info"><span><Zap size={13} /> {speed}% MAX</span><span><span className="kbd-label">SPACE</span> STOP</span></div>
                 <button className="full-stop" disabled={!socketConnected} onClick={() => { stopMovement(); socketRef.current?.emit('vehicle:stop'); }}><span>■</span> STOP VEHICLE</button>
+              </div>
+            </section>
+            <section className="panel vacuum-panel">
+              <div className="panel-heading"><div><div className="eyebrow">CLEANING SYSTEM</div><h2>Vacuum fan</h2></div><span className={`vacuum-state ${vacuumState === true ? 'vacuum-on' : ''}`}>{vacuumState === null ? 'UNCONFIRMED' : vacuumState ? 'ON · REPORTED' : 'OFF · REPORTED'}</span></div>
+              <div className="vacuum-actions">
+                <button type="button" disabled={!socketConnected || !vehicleConnected} onClick={() => setVacuum('vacuum_on')}>FAN ON</button>
+                <button type="button" disabled={!socketConnected || !vehicleConnected} onClick={() => setVacuum('vacuum_off')}>FAN OFF</button>
               </div>
             </section>
             <section className="safety-card"><span className="safety-icon"><AlertTriangle size={15} /></span><div><b>SAFETY FIRST</b><p>Software stop is not a substitute for a hardware emergency stop. Keep the physical cutoff accessible.</p></div></section>

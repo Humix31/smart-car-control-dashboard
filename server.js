@@ -12,6 +12,7 @@ const port = Number(process.env.PORT || 3000);
 const cameraSource = process.env.CAMERA_STREAM_URL || '';
 const cameraRoom = 'vehicle-camera';
 const stopTimeoutMs = 500;
+const controllerPingIntervalMs = 25000;
 const robotSockets = new Set();
 const dashboardSockets = new Set();
 const state = {
@@ -20,6 +21,7 @@ const state = {
   emergencyStopped: false,
   direction: 'stop',
   speed: 0,
+  vacuum: null,
   cameraConnected: false,
   telemetry: {
     batteryPercentage: null,
@@ -39,37 +41,73 @@ function log(event, details = {}) {
 }
 
 function broadcastStatus() {
-  io.emit('vehicle:status', { ...state, telemetry: { ...state.telemetry } });
+  const controllerProtocol = [...robotSockets].some((socket) => socket.controllerProtocol === 'command-json')
+    ? 'command-json'
+    : robotSockets.size ? 'move-json' : null;
+  io.emit('vehicle:status', { ...state, controllerProtocol, telemetry: { ...state.telemetry } });
 }
 
-function sendRobot(message) {
-  const serialized = JSON.stringify(message);
-  let sent = 0;
+function sendControllerStop(socket) {
+  if (socket.readyState !== WebSocket.OPEN) return false;
+  const message = socket.controllerProtocol === 'command-json'
+    ? { command: 'stop' }
+    : { type: 'stop' };
+  socket.send(JSON.stringify(message), (error) => {
+    if (error) log('controller.send-error', { message: error.message });
+  });
+  return true;
+}
+
+function sendMovement(command) {
+  const percentSpeed = Math.round(command.speed / 2.55);
+  const direction = Math.abs(command.x) > Math.abs(command.y)
+    ? (command.x > 0 ? 'right' : 'left')
+    : (command.y > 0 ? 'forward' : 'backward');
+
   for (const socket of robotSockets) {
     if (socket.readyState !== WebSocket.OPEN) continue;
-    socket.send(serialized, (error) => {
+    if (socket.controllerProtocol === 'command-json') {
+      if (socket.selectedSpeed !== percentSpeed) {
+        const speedMessage = JSON.stringify({ command: 'speed', speed: percentSpeed });
+        socket.send(speedMessage, (error) => {
+          if (error) log('controller.send-error', { message: error.message });
+        });
+        socket.selectedSpeed = percentSpeed;
+      }
+      const directionMessage = JSON.stringify({ command: direction });
+      socket.send(directionMessage, (error) => {
+        if (error) log('controller.send-error', { message: error.message });
+      });
+      continue;
+    }
+    const movementMessage = JSON.stringify(command);
+    socket.send(movementMessage, (error) => {
       if (error) log('controller.send-error', { message: error.message });
     });
-    sent += 1;
   }
-  return sent;
 }
 
-function stopVehicle(reason) {
+function stopVehicle(reason, { force = false } = {}) {
+  const wasMoving = state.direction !== 'stop' || [...dashboardSockets].some((socket) => socket.data.lastMovementAt);
   state.direction = 'stop';
   state.speed = 0;
   for (const socket of dashboardSockets) {
     delete socket.data.lastMovementAt;
   }
-  sendRobot({ type: 'stop' });
-  log('vehicle.stop', { reason });
+  if (!wasMoving && !force) return false;
+  let sent = 0;
+  for (const socket of robotSockets) {
+    if (sendControllerStop(socket)) sent += 1;
+  }
+  log('vehicle.stop', { reason, forwarded: sent > 0 });
   broadcastStatus();
+  return sent > 0;
 }
 
 const appRoot = path.join(__dirname, 'client', 'dist');
 app.use(express.json({ limit: '32kb' }));
 app.get('/health', (_request, response) => {
-  response.json({ ok: true, mode: 'hardware', controllerConnected: robotSockets.size > 0 });
+  response.json({ ok: true, mode: 'hardware', controllerConnected: state.connected });
 });
 app.get('/api/status', (_request, response) => {
   response.json({
@@ -99,7 +137,7 @@ io.on('connection', (socket) => {
 
   socket.on('vehicle:connect', (...args) => {
     const acknowledge = args.find((argument) => typeof argument === 'function') || (() => {});
-    state.connected = robotSockets.size > 0;
+    state.connected = [...robotSockets].some((robot) => robot.controllerOnline);
     acknowledge({ connected: state.connected, mode: 'hardware' });
     broadcastStatus();
     log('vehicle.connect', { mode: 'hardware', connected: state.connected });
@@ -107,7 +145,7 @@ io.on('connection', (socket) => {
 
   socket.on('vehicle:disconnect', () => {
     stopVehicle('dashboard disconnected vehicle');
-    state.connected = robotSockets.size > 0;
+    state.connected = [...robotSockets].some((robot) => robot.controllerOnline);
     broadcastStatus();
   });
 
@@ -131,26 +169,70 @@ io.on('connection', (socket) => {
       return;
     }
     const forwarded = { type: 'move', x: command.x, y: command.y, speed: command.speed };
-    if (sendRobot(forwarded) === 0) {
-      state.connected = false;
-      acknowledge({ ok: false, error: 'No connected robot WebSocket is available.' });
-      broadcastStatus();
-      return;
-    }
+    sendMovement(forwarded);
     state.direction = 'move';
-    state.speed = command.speed;
+    state.speed = Math.round(command.speed / 2.55);
     socket.data.lastMovementAt = Date.now();
     acknowledge({ ok: true });
     broadcastStatus();
   });
 
+  socket.on('vehicle:speed', (...args) => {
+    const percent = args[0];
+    const acknowledge = args.find((argument) => typeof argument === 'function') || (() => {});
+    if (!Number.isInteger(percent) || percent < 0 || percent > 100) {
+      acknowledge({ ok: false, error: 'Speed must be an integer from 0 to 100.' });
+      return;
+    }
+    if (!state.connected || robotSockets.size === 0) {
+      acknowledge({ ok: false, error: 'Vehicle is disconnected.' });
+      return;
+    }
+    state.speed = percent;
+    for (const robot of robotSockets) {
+      if (robot.controllerProtocol !== 'command-json' || robot.readyState !== WebSocket.OPEN) continue;
+      robot.send(JSON.stringify({ command: 'speed', speed: percent }), (error) => {
+        if (error) log('controller.send-error', { message: error.message });
+      });
+      robot.selectedSpeed = percent;
+    }
+    broadcastStatus();
+    acknowledge({ ok: true });
+  });
+
+  socket.on('vehicle:vacuum', (...args) => {
+    const command = args[0];
+    const acknowledge = args.find((argument) => typeof argument === 'function') || (() => {});
+    if (!['vacuum_on', 'vacuum_off'].includes(command)) {
+      acknowledge({ ok: false, error: 'Invalid vacuum command.' });
+      return;
+    }
+    if (!state.connected || robotSockets.size === 0) {
+      acknowledge({ ok: false, error: 'Vehicle is disconnected.' });
+      return;
+    }
+    let sent = 0;
+    for (const robot of robotSockets) {
+      if (robot.controllerProtocol !== 'command-json') continue;
+      if (robot.readyState !== WebSocket.OPEN) continue;
+      robot.send(JSON.stringify({ command }), (error) => {
+        if (error) log('controller.send-error', { message: error.message });
+      });
+      sent += 1;
+    }
+    acknowledge(sent > 0
+      ? { ok: true }
+      : { ok: false, error: 'The connected firmware protocol does not support vacuum commands.' });
+  });
+
   socket.on('vehicle:stop', () => {
-    stopVehicle('dashboard requested stop');
+    stopVehicle('dashboard requested stop', { force: true });
   });
 
   socket.on('vehicle:emergency-stop', () => {
+    const newlyLatched = !state.emergencyStopped;
     state.emergencyStopped = true;
-    stopVehicle('emergency stop');
+    if (newlyLatched) stopVehicle('emergency stop', { force: true });
     log('vehicle.emergency-stop');
   });
 
@@ -188,7 +270,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const hadActiveMovement = Boolean(socket.data.lastMovementAt);
     dashboardSockets.delete(socket);
-    if (hadActiveMovement || dashboardSockets.size === 0) {
+    if (hadActiveMovement || (dashboardSockets.size === 0 && state.direction !== 'stop')) {
       stopVehicle(hadActiveMovement ? 'control connection lost' : 'last dashboard disconnected');
     }
   });
@@ -203,20 +285,33 @@ server.on('upgrade', (request, socket, head) => {
     socket.destroy();
     return;
   }
-  if (pathname !== '/robot') {
+  if (pathname !== '/robot' && pathname !== '/ws') {
+    if (pathname !== '/socket.io' && pathname !== '/socket.io/') socket.destroy();
     return;
   }
+  const protocol = pathname === '/ws' ? 'command-json' : 'move-json';
+  log('controller.connection.attempt', { path: pathname, protocol });
   robotServer.handleUpgrade(request, socket, head, (websocket) => {
-    robotServer.emit('connection', websocket, request);
+    robotServer.emit('connection', websocket, request, protocol);
   });
 });
 
-robotServer.on('connection', (socket) => {
+robotServer.on('connection', (socket, request, protocol) => {
+  socket.controllerProtocol = protocol;
+  socket.isAlive = true;
+  socket.selectedSpeed = null;
+  socket.controllerOnline = false;
+  socket.on('pong', () => { socket.isAlive = true; });
   robotSockets.add(socket);
-  sendRobot({ type: 'stop' });
-  state.connected = true;
+  sendControllerStop(socket);
+  if (protocol === 'command-json') {
+    socket.send(JSON.stringify({ command: 'status' }), (error) => {
+      if (error) log('controller.send-error', { message: error.message });
+    });
+  }
+  state.connected = [...robotSockets].some((robot) => robot.controllerOnline);
   broadcastStatus();
-  log('controller.connected', { count: robotSockets.size });
+  log('controller.connected', { count: robotSockets.size, path: new URL(request.url, 'http://localhost').pathname, protocol });
 
   socket.on('message', (raw) => {
     let message;
@@ -226,7 +321,50 @@ robotServer.on('connection', (socket) => {
       log('controller.invalid-json', { message: error.message });
       return;
     }
+    if (!message || typeof message !== 'object' || Array.isArray(message)) {
+      log('controller.invalid-message', { reason: 'expected JSON object', protocol });
+      return;
+    }
+    if (typeof message.type === 'string') {
+      log('controller.message', { protocol, type: message.type });
+    }
+    if (message.type === 'status') {
+      if (typeof message.connected !== 'boolean') {
+        log('controller.invalid-status', { reason: 'missing connected boolean' });
+        return;
+      }
+      socket.controllerOnline = message.connected;
+      state.connected = [...robotSockets].some((robot) => robot.controllerOnline);
+      if (Number.isInteger(message.speed) && message.speed >= 0 && message.speed <= 100) {
+        state.speed = message.speed;
+        state.telemetry.currentSpeed = message.speed;
+      }
+      if (typeof message.obstacle === 'boolean') {
+        state.telemetry.obstacleDetected = message.obstacle;
+      } else if (typeof message.distanceCm === 'number' && Number.isFinite(message.distanceCm)) {
+        state.telemetry.obstacleDetected = message.distanceCm <= 20;
+      } else {
+        state.telemetry.obstacleDetected = null;
+      }
+      if (typeof message.distanceCm === 'number' && Number.isFinite(message.distanceCm)) {
+        state.telemetry.distanceCm = message.distanceCm;
+      } else state.telemetry.distanceCm = null;
+      if (typeof message.vacuum === 'boolean') state.vacuum = message.vacuum;
+      state.telemetry.receivedAt = new Date().toISOString();
+      if (!state.connected && state.direction !== 'stop') {
+        stopVehicle('controller reported disconnected');
+      } else {
+        broadcastStatus();
+      }
+      return;
+    }
     if (message.type === 'telemetry' || message.type === 'robot_status') {
+      if (message.type === 'robot_status' && typeof message.connected === 'boolean') {
+        socket.controllerOnline = message.connected;
+      } else {
+        socket.controllerOnline = true;
+      }
+      state.connected = [...robotSockets].some((robot) => robot.controllerOnline);
       const fields = {
         batteryPercentage: message.batteryPercentage,
         batteryVoltage: message.batteryVoltage,
@@ -241,33 +379,62 @@ robotServer.on('connection', (socket) => {
       }
       if (typeof message.obstacleDetected === 'boolean') {
         state.telemetry.obstacleDetected = message.obstacleDetected;
+      } else if (typeof message.obstacle === 'boolean') {
+        state.telemetry.obstacleDetected = message.obstacle;
+      } else if (typeof message.distanceCm === 'number' && Number.isFinite(message.distanceCm)) {
+        state.telemetry.obstacleDetected = message.distanceCm <= 20;
       }
+      if (typeof message.vacuum === 'boolean') state.vacuum = message.vacuum;
       if (Object.values(fields).some((value) => value !== undefined) ||
-          typeof message.obstacleDetected === 'boolean') {
+          typeof message.obstacleDetected === 'boolean' ||
+          typeof message.obstacle === 'boolean' ||
+          typeof message.vacuum === 'boolean') {
         state.telemetry.receivedAt = new Date().toISOString();
       }
-      broadcastStatus();
+      if (!state.connected && state.direction !== 'stop') {
+        stopVehicle('controller reported disconnected');
+      } else {
+        broadcastStatus();
+      }
     }
   });
   socket.on('close', () => {
     robotSockets.delete(socket);
+    state.connected = [...robotSockets].some((robot) => robot.controllerOnline);
     if (robotSockets.size === 0) {
-      state.connected = false;
-    state.telemetry.batteryPercentage = null;
-    state.telemetry.batteryVoltage = null;
-    state.telemetry.currentSpeed = null;
-    state.telemetry.motorStatus = 'N/A';
-    state.telemetry.wifiSignal = null;
-    state.telemetry.distanceCm = null;
-    state.telemetry.obstacleDetected = null;
-    state.telemetry.receivedAt = null;
-    stopVehicle('vehicle controller disconnected');
-  }
+      state.vacuum = null;
+      state.telemetry.batteryPercentage = null;
+      state.telemetry.batteryVoltage = null;
+      state.telemetry.currentSpeed = null;
+      state.telemetry.motorStatus = 'N/A';
+      state.telemetry.wifiSignal = null;
+      state.telemetry.distanceCm = null;
+      state.telemetry.obstacleDetected = null;
+      state.telemetry.receivedAt = null;
+      stopVehicle('vehicle controller disconnected');
+    }
     broadcastStatus();
-    log('controller.disconnected', { count: robotSockets.size });
+    log('controller.disconnected', {
+      count: robotSockets.size,
+      path: new URL(request.url, 'http://localhost').pathname,
+      code: socket.closeCode,
+      reason: socket.closeReason?.toString() || '',
+    });
   });
   socket.on('error', (error) => log('controller.error', { message: error.message }));
 });
+
+setInterval(() => {
+  for (const socket of robotSockets) {
+    if (socket.isAlive === false) {
+      log('controller.heartbeat.timeout', { protocol: socket.controllerProtocol });
+      socket.terminate();
+      continue;
+    }
+    socket.isAlive = false;
+    socket.ping();
+  }
+}, controllerPingIntervalMs).unref();
 
 setInterval(() => {
   for (const socket of dashboardSockets) {

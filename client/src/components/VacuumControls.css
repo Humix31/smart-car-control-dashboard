@@ -1,0 +1,42 @@
+.vacuum-panel .panel-heading {
+  padding: 12px 15px;
+}
+
+.vacuum-state {
+  color: #9b9079;
+  font: 700 8px 'DM Mono', monospace;
+  letter-spacing: .04em;
+  text-align: right;
+}
+
+.vacuum-state.vacuum-on {
+  color: #a8df8c;
+}
+
+.vacuum-actions {
+  display: flex;
+  gap: 9px;
+  padding: 12px 15px;
+}
+
+.vacuum-actions button {
+  flex: 1;
+  padding: 9px 7px;
+  border: 1px solid #384233;
+  border-radius: 4px;
+  background: #1a241b;
+  color: #b4e88a;
+  font: 700 8px 'DM Mono', monospace;
+  letter-spacing: .04em;
+  cursor: pointer;
+}
+
+.vacuum-actions button:last-child {
+  border-color: #493235;
+  background: #21191b;
+  color: #e99b9d;
+}
+
+.vacuum-actions button:hover:not(:disabled) {
+  filter: brightness(1.2);
+}
