@@ -38,7 +38,7 @@ The dashboard sends a Socket.IO `vehicle:command` event with this payload while 
 {"type":"move","x":0,"y":100,"speed":255}
 ```
 
-`x` and `y` are integers in `-100..100`; `speed` is integer PWM in `0..255` (the UI converts the 0–100% slider to PWM). Joystick diagonals send both axes. The dashboard refreshes movement commands every 150 ms. Releasing the joystick/button, pressing Space/Stop, losing browser focus, or disconnecting the dashboard requests a stop.
+`x` and `y` are integers in `-100..100`; `speed` is integer PWM in `0..255` (the UI converts the 0–100% slider to PWM). The inspection-bot mapping is forward `(0,100)`, backward `(0,-100)`, left `(-100,0)`, right `(100,0)`, with both full-scale axes sent for diagonals. The dashboard refreshes movement commands every 150 ms. Releasing the joystick/button, pressing Space/Stop, losing browser focus, or disconnecting the dashboard requests a stop.
 
 The backend validates that payload and forwards the **same JSON object**, unchanged, as a native WebSocket text message to every connected robot at `/robot`. Stop and emergency-stop are forwarded as:
 
@@ -90,7 +90,7 @@ Dashboard commands are plain JSON WebSocket text frames:
 {"command":"status"}
 ```
 
-The dashboard scales speed by joystick displacement up to the selected 0–100% maximum. The backend translates each movement update into one atomic direction-and-speed JSON frame, for example `{"command":"forward","speed":40}`. The ESP32 must apply that speed to its ENA/ENB PWM outputs when processing the frame. The ESP32 should report current state as:
+The dashboard scales speed by joystick displacement up to the selected 0–100% maximum. The backend translates each movement update into one atomic dominant-direction-and-speed JSON frame, for example `{"command":"forward","speed":40}`. This command protocol carries only one direction at a time and cannot represent simultaneous diagonal axes; use `/robot` with firmware that parses vector commands when diagonal movement is required. The ESP32 must apply the received speed to its motor-driver PWM outputs when processing the frame. The ESP32 should report current state as:
 
 ```json
 {"type":"status","connected":true,"speed":70,"obstacle":false,"vacuum":false}

@@ -255,9 +255,8 @@ export default function App() {
         x: current.x + movementKeys[key].x,
         y: current.y + movementKeys[key].y,
       }), { x: 0, y: 0 });
-      const magnitude = Math.hypot(vector.x, vector.y);
-      if (magnitude === 0) stopMovement();
-      else updateMovement({ x: vector.x * 100 / magnitude, y: vector.y * 100 / magnitude });
+      if (vector.x === 0 && vector.y === 0) stopMovement();
+      else updateMovement(vector);
     };
     const handleKeyDown = (event) => {
       if (isTextEntry(event.target)) return;

@@ -127,10 +127,37 @@ test('dashboard commands and telemetry use the documented /robot vector protocol
         error: 'The connected firmware protocol does not support vacuum commands.',
       });
 
-      const movement = { type: 'move', x: 34, y: 82, speed: 173 };
-      const forwardedMovement = nextRobotMessage(robot, (message) => message.type === 'move');
-      assert.deepEqual(await emitWithAck(dashboard, 'vehicle:command', movement), { ok: true });
-      assert.deepEqual(await forwardedMovement, movement);
+      const movements = [
+        { x: 0, y: 100 },
+        { x: 0, y: -100 },
+        { x: -100, y: 0 },
+        { x: 100, y: 0 },
+        { x: -100, y: 100 },
+        { x: 100, y: 100 },
+        { x: -100, y: -100 },
+        { x: 100, y: -100 },
+      ];
+      for (const vector of movements) {
+        const movement = { type: 'move', ...vector, speed: 173 };
+        const forwardedMovement = nextRobotMessage(robot, (message) => message.type === 'move');
+        assert.deepEqual(await emitWithAck(dashboard, 'vehicle:command', movement), { ok: true });
+        assert.deepEqual(await forwardedMovement, movement);
+      }
+
+      const validMovementAfterInvalid = nextRobotMessage(robot, (message) => message.type === 'move');
+      for (const vector of [{ x: 101, y: 0 }, { x: 0, y: -101 }]) {
+        assert.equal((await emitWithAck(dashboard, 'vehicle:command', {
+          type: 'move', ...vector, speed: 173,
+        })).ok, false);
+      }
+      const lowSpeedMovement = { type: 'move', x: 0, y: 100, speed: 1 };
+      assert.deepEqual(await emitWithAck(dashboard, 'vehicle:command', lowSpeedMovement), { ok: true });
+      assert.deepEqual(await validMovementAfterInvalid, lowSpeedMovement);
+
+      const maximumSpeedMovement = { type: 'move', x: 0, y: 100, speed: 255 };
+      const forwardedMaximumSpeed = nextRobotMessage(robot, (message) => message.type === 'move');
+      assert.deepEqual(await emitWithAck(dashboard, 'vehicle:command', maximumSpeedMovement), { ok: true });
+      assert.deepEqual(await forwardedMaximumSpeed, maximumSpeedMovement);
 
       const deadmanStop = nextRobotMessage(robot, (message) => message.type === 'stop', 1500);
       assert.deepEqual(await deadmanStop, { type: 'stop' });
@@ -139,6 +166,11 @@ test('dashboard commands and telemetry use the documented /robot vector protocol
       const explicitMovement = nextRobotMessage(robot, (message) => message.type === 'move');
       await emitWithAck(dashboard, 'vehicle:command', { type: 'move', x: -100, y: 0, speed: 100 });
       assert.deepEqual(await explicitMovement, { type: 'move', x: -100, y: 0, speed: 100 });
+      const zeroSpeedStop = nextRobotMessage(robot, (message) => message.type === 'stop');
+      assert.deepEqual(await emitWithAck(dashboard, 'vehicle:command', {
+        type: 'move', x: 0, y: 100, speed: 0,
+      }), { ok: true });
+      assert.deepEqual(await zeroSpeedStop, { type: 'stop' });
       const explicitStop = nextRobotMessage(robot, (message) => message.type === 'stop');
       dashboard.emit('vehicle:stop');
       assert.deepEqual(await explicitStop, { type: 'stop' });
@@ -185,6 +217,7 @@ test('the /ws command/status protocol reports genuine status and forwards contro
     await waitForEvent(robot, 'open');
     assert.deepEqual(await initialStop, { command: 'stop' });
     assert.deepEqual(await statusRequest, { command: 'status' });
+    robot.send('{invalid json');
 
     const dashboardConnected = waitForEvent(dashboard, 'connect');
     dashboard.connect();

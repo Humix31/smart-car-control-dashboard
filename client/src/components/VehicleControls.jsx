@@ -28,6 +28,8 @@ export function DirectionalControls({ enabled, activeDirection, onStart, onMove,
     const radius = bounds.width / 2 - 24;
     let x = (event.clientX - bounds.left - bounds.width / 2) / radius;
     let y = (event.clientY - bounds.top - bounds.height / 2) / radius;
+    const commandX = Math.max(-1, Math.min(1, x));
+    const commandY = Math.max(-1, Math.min(1, y));
     const magnitude = Math.hypot(x, y);
     if (magnitude > 1) {
       x /= magnitude;
@@ -36,9 +38,9 @@ export function DirectionalControls({ enabled, activeDirection, onStart, onMove,
     const knobX = x * radius;
     const knobY = y * radius;
     setKnob({ x: knobX, y: knobY });
-    if (Math.hypot(x, y) < 0.08) onStop();
-    else if (initial) onStart({ x: x * 100, y: -y * 100 });
-    else onMove({ x: x * 100, y: -y * 100 });
+    if (Math.hypot(commandX, commandY) < 0.08) onStop();
+    else if (initial) onStart({ x: commandX * 100, y: -commandY * 100 });
+    else onMove({ x: commandX * 100, y: -commandY * 100 });
   }
 
   function releaseJoystick() {
