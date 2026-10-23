@@ -8,7 +8,7 @@ const items = [
   { name: 'Settings', icon: Settings2 },
 ];
 
-export function Sidebar({ activeSection, onNavigate }) {
+export function Sidebar({ activeSection, onNavigate, showCamera }) {
   return (
     <aside className="sidebar">
       <a className="brand" href="#dashboard" onClick={() => onNavigate('Dashboard')} aria-label="Remote Vehicle System dashboard">
@@ -17,7 +17,7 @@ export function Sidebar({ activeSection, onNavigate }) {
       </a>
       <div className="nav-caption">WORKSPACE</div>
       <nav className="nav-list" aria-label="Main navigation">
-        {items.map(({ name, icon: Icon }) => (
+        {items.filter(({ name }) => name !== 'Camera' || showCamera).map(({ name, icon: Icon }) => (
           <button key={name} className={`nav-item ${activeSection === name ? 'selected' : ''}`} onClick={() => onNavigate(name)}>
             <Icon size={17} strokeWidth={1.8} /><span>{name}</span>
             {name === 'Telemetry' && <span className="nav-live-dot" aria-label="Live" />}
@@ -33,10 +33,10 @@ export function Sidebar({ activeSection, onNavigate }) {
   );
 }
 
-export function DashboardLayout({ activeSection, onNavigate, children }) {
+export function DashboardLayout({ activeSection, onNavigate, showCamera, children }) {
   return (
     <div className="app-shell">
-      <Sidebar activeSection={activeSection} onNavigate={onNavigate} />
+      <Sidebar activeSection={activeSection} onNavigate={onNavigate} showCamera={showCamera} />
       <main className="main-content">
         {children}
       </main>

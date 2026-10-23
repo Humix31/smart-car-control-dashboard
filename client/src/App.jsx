@@ -222,6 +222,10 @@ export default function App() {
     if (nextBotType === botType) return;
     stopMovement();
     setBotType(nextBotType);
+    if (nextBotType === 'vacuum' && activeSection === 'Camera') {
+      setActiveSection('Dashboard');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
     pushEvent(
       nextBotType === 'vacuum'
         ? 'Vacuum bot selected. Forward/reverse and left/right controls are reversed.'
@@ -296,9 +300,10 @@ export default function App() {
   }
 
   const movementEnabled = socketConnected && vehicleConnected && !emergencyStopped;
+  const showCamera = botType === 'inspection';
   const cameraSourceLabel = import.meta.env.VITE_DEMO_MODE === 'true' ? 'DEMO SOURCE' : cameraConfigured ? 'CAMERA READY' : 'NO SOURCE';
   return (
-    <DashboardLayout activeSection={activeSection} onNavigate={navigate}>
+    <DashboardLayout activeSection={activeSection} onNavigate={navigate} showCamera={showCamera}>
       <TopBar
         connected={vehicleConnected}
         mode={mode}
@@ -343,7 +348,7 @@ export default function App() {
         </section>
         <div className="main-grid">
           <div className="primary-column">
-            <LiveCamera socket={socket} cameraConnected={cameraConnected} configured={cameraConfigured} />
+            {showCamera && <LiveCamera socket={socket} cameraConnected={cameraConnected} configured={cameraConfigured} />}
             <TelemetryPanel telemetry={telemetry} connected={vehicleConnected} cameraConnected={cameraConnected} />
             <EventLog events={events} />
           </div>
