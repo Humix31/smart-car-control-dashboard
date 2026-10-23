@@ -279,7 +279,7 @@ export default function App() {
       <TopBar connected={vehicleConnected} mode={mode} emergencyStopped={emergencyStopped} onEmergencyStop={emergencyStopped ? clearEmergencyStop : emergencyStop} />
       <div className="dashboard-scroll">
         <div className="welcome-row">
-          <div><p className="eyebrow">CONTROL CENTER <span className="heading-slash">/</span> LIVE OPERATIONS</p><h1>Mission dashboard</h1><p className="welcome-copy">Monitor your vehicle and take control in real time.</p></div>
+          <div><p className="eyebrow">CONTROL CENTER <span className="heading-slash">/</span> LIVE OPERATIONS</p><h1>Remote Vehicle System</h1><p className="welcome-copy">Monitor your vehicle and take control in real time.</p></div>
           <div className={`session-indicator ${socketConnected ? 'session-online' : ''}`}><span className="status-dot" /><span><b>{socketConnected ? 'CONTROL LINK ONLINE' : 'CONTROL LINK OFFLINE'}</b><small>{socketConnected ? 'BACKEND CONNECTED' : 'RECONNECTING'}</small></span></div>
         </div>
         {connectionError && <div className="error-banner" role="alert"><AlertTriangle size={16} /><span>{connectionError}</span><button onClick={() => setConnectionError('')} aria-label="Dismiss error">×</button></div>}
@@ -319,7 +319,7 @@ export default function App() {
             <SettingsPanel mode={mode} cameraConfigured={cameraConfigured} />
           </aside>
         </div>
-        <footer className="dashboard-footer"><span>ROVEROS <i>·</i> VEHICLE CONTROL</span><span>LAST TELEMETRY <b>{telemetry.receivedAt ? new Date(telemetry.receivedAt).toLocaleTimeString() : 'N/A'}</b></span><span>SESSION LATENCY <b>{typeof telemetry.latencyMs === 'number' ? `${telemetry.latencyMs} ms` : 'N/A'}</b></span></footer>
+        <footer className="dashboard-footer"><span>REMOTE VEHICLE SYSTEM <i>·</i> VEHICLE CONTROL</span><span>LAST TELEMETRY <b>{telemetry.receivedAt ? new Date(telemetry.receivedAt).toLocaleTimeString() : 'N/A'}</b></span><span>SESSION LATENCY <b>{typeof telemetry.latencyMs === 'number' ? `${telemetry.latencyMs} ms` : 'N/A'}</b></span></footer>
       </div>
       <div className="mobile-estop-wrap"><EmergencyStopButton onClick={emergencyStopped ? clearEmergencyStop : emergencyStop} stopped={emergencyStopped} /></div>
     </DashboardLayout>

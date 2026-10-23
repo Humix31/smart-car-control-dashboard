@@ -11,9 +11,9 @@ const items = [
 export function Sidebar({ activeSection, onNavigate }) {
   return (
     <aside className="sidebar">
-      <a className="brand" href="#dashboard" onClick={() => onNavigate('Dashboard')} aria-label="RoverOS dashboard">
+      <a className="brand" href="#dashboard" onClick={() => onNavigate('Dashboard')} aria-label="Remote Vehicle System dashboard">
         <span className="brand-mark"><CarFront size={19} /></span>
-        <span><strong>ROVER<span>OS</span></strong><small>REMOTE VEHICLE SYSTEMS</small></span>
+        <span className="brand-copy"><strong>REMOTE</strong><strong className="brand-accent">VEHICLE SYSTEM</strong><small>REMOTE OPERATIONS</small></span>
       </a>
       <div className="nav-caption">WORKSPACE</div>
       <nav className="nav-list" aria-label="Main navigation">
@@ -25,9 +25,9 @@ export function Sidebar({ activeSection, onNavigate }) {
         ))}
       </nav>
       <div className="sidebar-bottom">
-        <div className="vehicle-mini"><span className="vehicle-icon"><CarFront size={17} /></span><span><b>ROVER-01</b><small>PRIMARY VEHICLE</small></span><i /></div>
+        <div className="vehicle-mini"><span className="vehicle-icon"><CarFront size={17} /></span><span><b>RVS-01</b><small>PRIMARY VEHICLE</small></span><i /></div>
         <p>CONTROL LINK <span>WEBSOCKET</span></p>
-        <small className="version">ROVEROS BUILD 2.4.0</small>
+        <small className="version">RVS BUILD 2.4.0</small>
       </div>
     </aside>
   );
@@ -47,7 +47,7 @@ export function DashboardLayout({ activeSection, onNavigate, children }) {
 export function TopBar({ connected, mode, emergencyStopped, onEmergencyStop }) {
   return (
     <header className="topbar">
-      <div className="breadcrumb"><span>FLEET</span><i>/</i><b>ROVER-01</b></div>
+      <div className="breadcrumb"><span>FLEET</span><i>/</i><b>RVS-01</b></div>
       <div className="topbar-actions">
         <span className={`connection-pill ${connected ? 'is-online' : ''}`}>
           <span className="status-dot" />{connected ? 'VEHICLE CONNECTED' : 'VEHICLE OFFLINE'}
