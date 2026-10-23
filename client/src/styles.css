@@ -1255,6 +1255,11 @@ kbd,
   transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
 }
 
+.direction-button {
+  touch-action: none;
+  user-select: none;
+}
+
 .direction-button:hover:not(:disabled),
 .pad-stop:hover:not(:disabled) {
   transform: translateY(-1px);

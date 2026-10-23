@@ -52,6 +52,7 @@ export default function App() {
   const socketRef = useRef(null);
   const movementIntervalRef = useRef(null);
   const speedRef = useRef(speed);
+  const pressedMovementKeysRef = useRef(new Set());
   speedRef.current = speed;
   const pushEvent = useCallback((message, type = 'info') => {
     setEvents((current) => [{ id: `${Date.now()}-${Math.random()}`, message, type, time: now() }, ...current].slice(0, 7));
@@ -235,28 +236,55 @@ export default function App() {
   }
 
   useEffect(() => {
+    const movementKeys = {
+      KeyW: { x: 0, y: 100 },
+      KeyA: { x: -100, y: 0 },
+      KeyS: { x: 0, y: -100 },
+      KeyD: { x: 100, y: 0 },
+    };
+    const isTextEntry = (target) => target instanceof HTMLElement && (
+      ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable
+    );
+    const updateKeyboardMovement = () => {
+      const pressed = pressedMovementKeysRef.current;
+      if (pressed.size === 0) {
+        stopMovement();
+        return;
+      }
+      const vector = [...pressed].reduce((current, key) => ({
+        x: current.x + movementKeys[key].x,
+        y: current.y + movementKeys[key].y,
+      }), { x: 0, y: 0 });
+      const magnitude = Math.hypot(vector.x, vector.y);
+      if (magnitude === 0) stopMovement();
+      else updateMovement({ x: vector.x * 100 / magnitude, y: vector.y * 100 / magnitude });
+    };
     const handleKeyDown = (event) => {
-      if (event.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName)) return;
-      const keys = {
-        KeyW: { x: 0, y: 100 },
-        KeyA: { x: -100, y: 0 },
-        KeyS: { x: 0, y: -100 },
-        KeyD: { x: 100, y: 0 },
-      };
-      const vector = keys[event.code];
-      if (vector) {
+      if (isTextEntry(event.target)) return;
+      if (movementKeys[event.code]) {
         event.preventDefault();
-        if (!event.repeat && !movementRef.current) startMovement(vector);
+        if (!pressedMovementKeysRef.current.has(event.code)) {
+          pressedMovementKeysRef.current.add(event.code);
+          updateKeyboardMovement();
+        }
       } else if (event.code === 'Space') {
         event.preventDefault();
-        stopMovement();
-        socketRef.current?.emit('vehicle:stop');
+        if (!event.repeat) {
+          pressedMovementKeysRef.current.clear();
+          stopMovement();
+          socketRef.current?.emit('vehicle:stop');
+        }
       }
     };
     const handleKeyUp = (event) => {
-      if (['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(event.code)) stopMovement();
+      if (!pressedMovementKeysRef.current.has(event.code)) return;
+      pressedMovementKeysRef.current.delete(event.code);
+      updateKeyboardMovement();
     };
-    const loseFocus = () => stopMovement();
+    const loseFocus = () => {
+      pressedMovementKeysRef.current.clear();
+      stopMovement();
+    };
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('blur', loseFocus);
@@ -267,7 +295,7 @@ export default function App() {
       window.removeEventListener('blur', loseFocus);
       document.removeEventListener('visibilitychange', loseFocus);
     };
-  }, [startMovement, stopMovement]);
+  }, [updateMovement, stopMovement]);
 
   function emergencyStop() {
     stopMovement();
