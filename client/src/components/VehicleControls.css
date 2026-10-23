@@ -65,8 +65,8 @@
 }
 
 .control-content .direction-pad {
-  grid-template-rows: auto repeat(3, 1fr);
-  height: 260px;
+  grid-template-rows: auto repeat(3, minmax(52px, auto));
+  height: auto;
 }
 
 .control-content .direction-button.up {
