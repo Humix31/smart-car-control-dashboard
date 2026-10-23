@@ -9,9 +9,18 @@ const controls = [
   { direction: 'right', label: 'Turn right', key: 'D', icon: ArrowRight, className: 'right', x: 100, y: 0 },
 ];
 
-export function DirectionalControls({ enabled, activeDirection, onStart, onMove, onStop }) {
+export function DirectionalControls({ enabled, activeDirection, onStart, onMove, onStop, reversed = false }) {
   const joystickRef = useRef(null);
   const [knob, setKnob] = useState({ x: 0, y: 0 });
+  const displayedControls = controls.map((control) => {
+    if (!reversed) return control;
+    const opposite = controls.find(({ direction }) => (
+      direction === { forward: 'reverse', reverse: 'forward', left: 'right', right: 'left' }[control.direction]
+    ));
+    return opposite
+      ? { ...control, direction: opposite.direction, label: opposite.label, icon: opposite.icon }
+      : control;
+  });
 
   function updateJoystick(event, initial = false) {
     const bounds = joystickRef.current?.getBoundingClientRect();
@@ -64,7 +73,7 @@ export function DirectionalControls({ enabled, activeDirection, onStart, onMove,
         </div>
         <span className="joystick-instruction">DRAG TO STEER · RELEASE TO STOP</span>
       </div>
-      {controls.map(({ direction, label, key, icon: Icon, className, x, y }) => (
+      {displayedControls.map(({ direction, label, key, icon: Icon, className, x, y }) => (
         <button
           key={direction}
           type="button"

@@ -31,6 +31,10 @@ function movementSpeedPercent(movement, maximumSpeed) {
 
 export default function App() {
   const [activeSection, setActiveSection] = useState('Dashboard');
+  const [theme, setTheme] = useState(() => (
+    window.localStorage.getItem('rvs-theme') === 'light' ? 'light' : 'dark'
+  ));
+  const [botType, setBotType] = useState('inspection');
   const [socket, setSocket] = useState(null);
   const [socketConnected, setSocketConnected] = useState(false);
   const [vehicleConnected, setVehicleConnected] = useState(false);
@@ -52,6 +56,11 @@ export default function App() {
   const pushEvent = useCallback((message, type = 'info') => {
     setEvents((current) => [{ id: `${Date.now()}-${Math.random()}`, message, type, time: now() }, ...current].slice(0, 7));
   }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem('rvs-theme', theme);
+  }, [theme]);
 
   useEffect(() => {
     fetch('/api/camera/config')
@@ -126,8 +135,9 @@ export default function App() {
 
   const startMovement = useCallback((vector) => {
     if (!socketRef.current?.connected || !vehicleConnected || emergencyStopped || speedRef.current === 0) return;
-    const x = Math.max(-100, Math.min(100, Math.round(vector.x)));
-    const y = Math.max(-100, Math.min(100, Math.round(vector.y)));
+    const direction = botType === 'vacuum' ? -1 : 1;
+    const x = Math.max(-100, Math.min(100, Math.round(vector.x * direction)));
+    const y = Math.max(-100, Math.min(100, Math.round(vector.y * direction)));
     if (x === 0 && y === 0) return;
     if (movementRef.current) return;
     movementRef.current = { x, y };
@@ -153,7 +163,7 @@ export default function App() {
       sendCommand();
       movementIntervalRef.current = window.setInterval(sendCommand, 150);
     }
-  }, [vehicleConnected, emergencyStopped, stopMovement, pushEvent]);
+  }, [botType, vehicleConnected, emergencyStopped, stopMovement, pushEvent]);
 
   const updateMovement = useCallback((vector) => {
     if (!movementRef.current) {
@@ -161,12 +171,13 @@ export default function App() {
       return;
     }
     if (!socketRef.current?.connected || !vehicleConnected || emergencyStopped) return;
-    const x = Math.max(-100, Math.min(100, Math.round(vector.x)));
-    const y = Math.max(-100, Math.min(100, Math.round(vector.y)));
+    const direction = botType === 'vacuum' ? -1 : 1;
+    const x = Math.max(-100, Math.min(100, Math.round(vector.x * direction)));
+    const y = Math.max(-100, Math.min(100, Math.round(vector.y * direction)));
     if (x === 0 && y === 0) return;
     movementRef.current = { x, y };
     setActiveDirection(Math.abs(y) >= Math.abs(x) ? (y > 0 ? 'forward' : 'reverse') : (x > 0 ? 'right' : 'left'));
-  }, [vehicleConnected, emergencyStopped, startMovement]);
+  }, [botType, vehicleConnected, emergencyStopped, startMovement]);
 
   function changeSpeed(value) {
     setSpeed(value);
@@ -205,6 +216,18 @@ export default function App() {
         pushEvent(message, 'error');
       }
     });
+  }
+
+  function changeBotType(nextBotType) {
+    if (nextBotType === botType) return;
+    stopMovement();
+    setBotType(nextBotType);
+    pushEvent(
+      nextBotType === 'vacuum'
+        ? 'Vacuum bot selected. Forward/reverse and left/right controls are reversed.'
+        : 'Inspection bot selected. Forward movement is enabled.',
+      'info',
+    );
   }
 
   useEffect(() => {
@@ -276,7 +299,14 @@ export default function App() {
   const cameraSourceLabel = import.meta.env.VITE_DEMO_MODE === 'true' ? 'DEMO SOURCE' : cameraConfigured ? 'CAMERA READY' : 'NO SOURCE';
   return (
     <DashboardLayout activeSection={activeSection} onNavigate={navigate}>
-      <TopBar connected={vehicleConnected} mode={mode} emergencyStopped={emergencyStopped} onEmergencyStop={emergencyStopped ? clearEmergencyStop : emergencyStop} />
+      <TopBar
+        connected={vehicleConnected}
+        mode={mode}
+        emergencyStopped={emergencyStopped}
+        onEmergencyStop={emergencyStopped ? clearEmergencyStop : emergencyStop}
+        theme={theme}
+        onToggleTheme={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')}
+      />
       <div className="dashboard-scroll">
         <div className="welcome-row">
           <div><p className="eyebrow">CONTROL CENTER <span className="heading-slash">/</span> LIVE OPERATIONS</p><h1>Remote Vehicle System</h1><p className="welcome-copy">Monitor your vehicle and take control in real time.</p></div>
@@ -284,6 +314,27 @@ export default function App() {
         </div>
         {connectionError && <div className="error-banner" role="alert"><AlertTriangle size={16} /><span>{connectionError}</span><button onClick={() => setConnectionError('')} aria-label="Dismiss error">×</button></div>}
         {emergencyStopped && <div className="latched-banner"><AlertTriangle size={16} /><span><b>EMERGENCY STOP LATCHED</b> — reset only after physically confirming the vehicle is safe.</span><button onClick={clearEmergencyStop}>CONFIRM RESET</button></div>}
+        <section className="bot-profile panel" aria-label="Bot selection">
+          <div className="bot-profile-copy">
+            <p className="eyebrow">ACTIVE BOT PROFILE</p>
+            <strong>{botType === 'inspection' ? 'Inspection Bot' : 'Vacuum Bot'}</strong>
+            <span>{botType === 'inspection' ? 'Forward controls drive forward.' : 'Forward/reverse and left/right controls are swapped.'}</span>
+          </div>
+          <div className="bot-profile-options" role="group" aria-label="Select bot type">
+            <button
+              type="button"
+              className={botType === 'inspection' ? 'selected' : ''}
+              aria-pressed={botType === 'inspection'}
+              onClick={() => changeBotType('inspection')}
+            >Inspection Bot</button>
+            <button
+              type="button"
+              className={botType === 'vacuum' ? 'selected' : ''}
+              aria-pressed={botType === 'vacuum'}
+              onClick={() => changeBotType('vacuum')}
+            >Vacuum Bot</button>
+          </div>
+        </section>
         <section className="metrics-row" aria-label="Vehicle status">
           <div className="metric-card"><span className="metric-icon lime"><CarFront size={18} /></span><span><small>VEHICLE STATUS</small><b>{vehicleConnected ? 'Vehicle Online' : 'Vehicle Offline'}</b></span><i className={vehicleConnected ? 'metric-online' : ''} /></div>
           <div className="metric-card"><span className="metric-icon blue"><BatteryIndicator percentage={telemetry.batteryPercentage} /></span><span><small>BATTERY LEVEL</small><b>{typeof telemetry.batteryPercentage === 'number' ? `${Math.round(telemetry.batteryPercentage)}%` : 'N/A'}</b></span></div>
@@ -298,10 +349,10 @@ export default function App() {
           </div>
           <aside className="control-column" id="controls">
             <section className="panel control-panel">
-              <div className="panel-heading"><div><div className="eyebrow">MANUAL OPERATION</div><h2>Drive controls</h2></div><span className={`control-ready ${movementEnabled ? 'ready' : ''}`}><i />{movementEnabled ? 'READY' : 'LOCKED'}</span></div>
+              <div className="panel-heading"><div><div className="eyebrow">{botType === 'inspection' ? 'INSPECTION BOT' : 'VACUUM BOT · REVERSED CONTROLS'}</div><h2>Drive controls</h2></div><span className={`control-ready ${movementEnabled ? 'ready' : ''}`}><i />{movementEnabled ? 'READY' : 'LOCKED'}</span></div>
               <div className="control-content">
                 <div className="control-help"><span>PRESS & HOLD TO MOVE</span><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span></div>
-                <DirectionalControls enabled={movementEnabled && speed > 0} activeDirection={activeDirection} onStart={startMovement} onMove={updateMovement} onStop={stopMovement} />
+                <DirectionalControls enabled={movementEnabled && speed > 0} activeDirection={activeDirection} onStart={startMovement} onMove={updateMovement} onStop={stopMovement} reversed={botType === 'vacuum'} />
                 <SpeedSlider value={speed} onChange={changeSpeed} disabled={!vehicleConnected} />
                 <div className="control-readout"><span><i className="tiny-car"><CarFront size={15} /></i> SELECTED SPEED</span><b>{speed}<small> %</small></b></div>
                 <div className="control-quick-info"><span><Zap size={13} /> {speed}% MAX</span><span><span className="kbd-label">SPACE</span> STOP</span></div>

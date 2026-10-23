@@ -1628,3 +1628,282 @@ input[type="range"] {
     align-items: flex-start;
   }
 }
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel-soft);
+  color: var(--text);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  cursor: pointer;
+}
+
+.theme-toggle:hover {
+  border-color: var(--line-strong);
+}
+
+.bot-profile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+}
+
+.bot-profile-copy {
+  display: grid;
+  gap: 5px;
+}
+
+.bot-profile-copy strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.bot-profile-copy > span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.bot-profile-options {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--bg-elevated);
+}
+
+.bot-profile-options button {
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted-strong);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.bot-profile-options button.selected {
+  border-color: var(--line-strong);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #edf3f8;
+  --bg-elevated: #e5edf4;
+  --panel: rgba(255, 255, 255, 0.96);
+  --panel-strong: #ffffff;
+  --panel-soft: rgba(243, 248, 252, 0.96);
+  --sidebar: #f7fafc;
+  --line: rgba(45, 77, 103, 0.16);
+  --line-strong: rgba(29, 117, 169, 0.38);
+  --text: #162c3d;
+  --muted: #687f91;
+  --muted-strong: #415c70;
+  --accent: #1179ae;
+  --accent-strong: #168cc8;
+  --accent-soft: rgba(22, 140, 200, 0.1);
+  --success: #25884b;
+  --warning: #a66c00;
+  --danger: #bf3535;
+  --shadow: rgba(37, 67, 90, 0.12);
+}
+
+:root[data-theme="light"] body {
+  background:
+    radial-gradient(circle at top left, rgba(56, 153, 204, 0.1), transparent 27%),
+    radial-gradient(circle at bottom right, rgba(60, 152, 117, 0.08), transparent 30%),
+    linear-gradient(180deg, #f3f7fa 0%, #eaf1f6 100%);
+  color: var(--text);
+}
+
+:root[data-theme="light"] .app-shell {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+:root[data-theme="light"] .sidebar {
+  background: linear-gradient(180deg, #fbfdff, #f2f7fa);
+}
+
+:root[data-theme="light"] .brand-mark {
+  color: #075b84;
+  background: linear-gradient(135deg, #d8f2ff, #a9dcf3);
+  border-color: rgba(17, 121, 174, 0.24);
+  box-shadow: 0 5px 18px rgba(22, 140, 200, 0.12);
+}
+
+:root[data-theme="light"] .nav-item:hover {
+  background: rgba(35, 105, 146, 0.06);
+}
+
+:root[data-theme="light"] .nav-item.selected {
+  background: linear-gradient(90deg, rgba(22, 140, 200, 0.12), rgba(22, 140, 200, 0.03));
+}
+
+:root[data-theme="light"] .vehicle-mini,
+:root[data-theme="light"] .connection-pill,
+:root[data-theme="light"] .mode-pill,
+:root[data-theme="light"] .session-indicator,
+:root[data-theme="light"] .metric-card,
+:root[data-theme="light"] .telemetry-tile,
+:root[data-theme="light"] .panel {
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(35, 67, 90, 0.055);
+}
+
+:root[data-theme="light"] .topbar {
+  background: rgba(249, 252, 254, 0.9);
+}
+
+:root[data-theme="light"] .mode-pill.hardware {
+  color: #925400;
+}
+
+:root[data-theme="light"] .metric-icon.lime,
+:root[data-theme="light"] .tile-icon,
+:root[data-theme="light"] .telemetry-item-icon {
+  background: rgba(22, 140, 200, 0.09);
+  color: #1179ae;
+}
+
+:root[data-theme="light"] .metric-icon.blue {
+  background: rgba(22, 140, 200, 0.1);
+  color: #1179ae;
+}
+
+:root[data-theme="light"] .metric-icon.purple {
+  background: rgba(108, 91, 184, 0.1);
+  color: #6557a8;
+}
+
+:root[data-theme="light"] .telemetry-panel .obstacle-warning {
+  border-color: rgba(191, 53, 53, 0.18);
+  background: #fff1ef;
+  color: #a62e2e;
+}
+
+:root[data-theme="light"] .telemetry-panel .obstacle-warning.obstacle-clear {
+  border-color: rgba(37, 136, 75, 0.18);
+  background: #edf8f0;
+  color: #216d3e;
+}
+
+:root[data-theme="light"] .telemetry-item,
+:root[data-theme="light"] .event-row,
+:root[data-theme="light"] .setting-summary {
+  background: #f7fafc;
+}
+
+:root[data-theme="light"] .control-help,
+:root[data-theme="light"] kbd,
+:root[data-theme="light"] .kbd-label,
+:root[data-theme="light"] .control-readout,
+:root[data-theme="light"] .speed-setting {
+  background: #f5f9fc;
+}
+
+:root[data-theme="light"] .direction-button {
+  background: #f5f9fc;
+}
+
+:root[data-theme="light"] .direction-button.active {
+  background: rgba(22, 140, 200, 0.12);
+  color: #086b9d;
+}
+
+:root[data-theme="light"] .joystick-control {
+  border-color: rgba(45, 77, 103, 0.25);
+  background: radial-gradient(circle, #e9f2f7 0%, #dae7ef 60%, #d3e1ea 100%);
+  box-shadow: inset 0 0 22px rgba(28, 62, 83, 0.1), 0 0 0 6px rgba(35, 67, 90, 0.035);
+}
+
+:root[data-theme="light"] .joystick-axis {
+  background: rgba(74, 111, 136, 0.5);
+}
+
+:root[data-theme="light"] .joystick-nub {
+  border-color: #f5fff0;
+  background: radial-gradient(circle at 35% 30%, #9ff2b2, #42bb72 75%);
+  box-shadow: 0 0 18px rgba(37, 136, 75, 0.28), inset 0 0 7px rgba(255, 255, 255, 0.9);
+}
+
+:root[data-theme="light"] .vacuum-actions button {
+  background: #edf8f0;
+  color: #216d3e;
+}
+
+:root[data-theme="light"] .vacuum-actions button:last-child {
+  background: #fff1ef;
+  color: #a62e2e;
+}
+
+:root[data-theme="light"] .safety-card {
+  border-color: rgba(166, 108, 0, 0.2);
+  background: #fff8e8;
+  color: #805600;
+}
+
+:root[data-theme="light"] .safety-card p {
+  color: #805600;
+}
+
+:root[data-theme="light"] .setting-warning {
+  background: #fff8e8;
+  color: #594b30;
+}
+
+:root[data-theme="light"] .error-banner {
+  background: #fff7e8;
+  color: #805600;
+}
+
+:root[data-theme="light"] .latched-banner {
+  background: #fff0f0;
+  color: #922d2d;
+}
+
+:root[data-theme="light"] .emergency-button,
+:root[data-theme="light"] .full-stop,
+:root[data-theme="light"] .pad-stop,
+:root[data-theme="light"] .mobile-estop {
+  border-color: rgba(191, 53, 53, 0.28);
+  background: #fff0ef;
+  color: #a62e2e;
+}
+
+:root[data-theme="light"] .auth-banner {
+  background: #edf8f0;
+  color: #216d3e;
+}
+
+:root[data-theme="light"] .bot-profile-options {
+  background: #edf3f8;
+}
+
+@media (max-width: 760px) {
+  .bot-profile {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .bot-profile-options {
+    width: 100%;
+  }
+
+  .bot-profile-options button {
+    flex: 1;
+  }
+}

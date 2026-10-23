@@ -1,4 +1,4 @@
-import { Activity, Camera, CarFront, LayoutDashboard, Settings2, SlidersHorizontal } from 'lucide-react';
+import { Activity, Camera, CarFront, LayoutDashboard, Moon, Settings2, SlidersHorizontal, Sun } from 'lucide-react';
 
 const items = [
   { name: 'Dashboard', icon: LayoutDashboard },
@@ -44,7 +44,7 @@ export function DashboardLayout({ activeSection, onNavigate, children }) {
   );
 }
 
-export function TopBar({ connected, mode, emergencyStopped, onEmergencyStop }) {
+export function TopBar({ connected, mode, emergencyStopped, onEmergencyStop, theme, onToggleTheme }) {
   return (
     <header className="topbar">
       <div className="breadcrumb"><span>FLEET</span><i>/</i><b>RVS-01</b></div>
@@ -53,6 +53,16 @@ export function TopBar({ connected, mode, emergencyStopped, onEmergencyStop }) {
           <span className="status-dot" />{connected ? 'VEHICLE CONNECTED' : 'VEHICLE OFFLINE'}
         </span>
         <span className="mode-pill hardware">{mode.toUpperCase()}</span>
+        <button
+          type="button"
+          className="theme-toggle"
+          onClick={onToggleTheme}
+          aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+        >
+          {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+          <span>{theme === 'dark' ? 'LIGHT' : 'DARK'}</span>
+        </button>
         <button className={`emergency-button ${emergencyStopped ? 'latched' : ''}`} onClick={onEmergencyStop} aria-label="Emergency stop vehicle">
           <span className="estop-icon">■</span><span>{emergencyStopped ? 'STOP LATCHED' : 'EMERGENCY STOP'}</span>
         </button>
