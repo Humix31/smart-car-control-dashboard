@@ -1177,9 +1177,8 @@ kbd,
 
 .joystick-control {
   position: relative;
-  width: 136px;
+  width: clamp(112px, 30vw, 136px);
   aspect-ratio: 1;
-  overflow: hidden;
   border: 1px solid rgba(146, 174, 196, 0.3);
   border-radius: 50%;
   background: radial-gradient(circle, rgba(21, 33, 45, 1) 0%, rgba(12, 19, 28, 1) 58%, rgba(7, 12, 17, 1) 100%);

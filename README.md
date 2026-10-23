@@ -32,27 +32,27 @@ These tests use a mock native WebSocket robot and a real Socket.IO client. They 
 
 ## Communication protocol
 
-The dashboard sends a Socket.IO `vehicle:command` event with this payload while a control is held:
+The dashboard sends a Socket.IO `vehicle:command` event with normalized axes while a control is held:
 
 ```json
-{"type":"move","x":0,"y":100,"speed":255}
+{"type":"control","x":0.0,"y":1.0,"speed":70}
 ```
 
-`x` and `y` are integers in `-100..100`; `speed` is integer PWM in `0..255` (the UI converts the 0–100% slider to PWM). The inspection-bot mapping is forward `(0,100)`, backward `(0,-100)`, left `(-100,0)`, right `(100,0)`, with both full-scale axes sent for diagonals. The dashboard refreshes movement commands every 150 ms. Releasing the joystick/button, pressing Space/Stop, losing browser focus, or disconnecting the dashboard requests a stop.
+`x` and `y` are finite numbers in `-1..1`; positive X is right, positive Y is forward, and `speed` is an integer percentage in `0..100`. The dashboard refreshes movement commands every 150 ms. Releasing the joystick/button, pressing Space/Stop, losing browser focus, or disconnecting the dashboard requests a stop. Independent held inputs are combined; releasing one input does not stop another input that remains held.
 
-The backend validates that payload and forwards the **same JSON object**, unchanged, as a native WebSocket text message to every connected robot at `/robot`. Stop and emergency-stop are forwarded as:
+The backend validates the normalized payload. For backward compatibility, `/robot` receives the legacy vector frame (`x`/`y` scaled to `-100..100`, `speed` converted to PWM `0..255`). The `/ws` endpoint receives normalized `type:"control"` frames and `type:"stop"` frames. Its stop frame is:
 
 ```json
 {"type":"stop"}
 ```
 
-The ESP32 must parse these messages and implement the axes/speed-to-motors mapping in its existing firmware. The working Arduino sketch is not present in this repository, so compatibility of its parser and motor behavior is **not yet confirmed**. No GPIO assignments or firmware implementation have been invented here.
+The `/ws` endpoint receives the normalized control frame unchanged and uses the same stop frame above. The firmware in [`firmware/inspection-cleaning-bot.ino`](./firmware/inspection-cleaning-bot.ino) parses this contract and uses the existing GPIO 26/27/14/13 direction pins and GPIO 25/33 PWM enables. Its differential-drive mixer is `leftMotor = y + x` and `rightMotor = y - x`, with both outputs divided by the same scale factor when either exceeds `1` or is below `-1`, then multiplied by the speed percentage. Side A controls the left pair and side B the right pair. The two independent `INVERT_SIDE_*` settings are retained from the supplied sketch; verify them with the wheels raised before driving.
 
 The backend stops sending movement and sends the protocol-appropriate STOP when it has received no refreshed movement command for 500 ms. It also sends stop when the dashboard control socket or robot WebSocket closes. A server cannot deliver a stop over a broken network: a firmware-side motor watchdog and independent hardware emergency stop are still essential. A newly connected robot receives stop immediately; movement is never resumed automatically. Emergency stop remains latched until the connected vehicle is stopped and a user confirms reset.
 
 ### ESP32 connection and telemetry
 
-Connect the existing ESP32 firmware's native WebSocket client to the Render service:
+The legacy vector firmware protocol uses the native WebSocket `/robot` endpoint:
 
 ```text
 wss://smart-car-control-dashboard.onrender.com/robot
@@ -68,7 +68,7 @@ The backend requires no application control or robot token. Any reachable client
 
 ### Command/status WebSocket at `/ws`
 
-Use this path when the ESP32 firmware expects JSON commands rather than movement vectors:
+Use this path for firmware implementing the normalized control-frame contract:
 
 ```text
 wss://smart-car-control-dashboard.onrender.com/ws
@@ -76,27 +76,33 @@ wss://smart-car-control-dashboard.onrender.com/ws
 
 For local development, use `ws://<computer-on-the-same-network>:3000/ws`. After the standard WebSocket upgrade, the server requests status with `{"command":"status"}`. The controller is reported online only after it responds with a valid `type:"status"` message containing a boolean `connected` value; opening the socket alone does not show the rover as online.
 
-Dashboard commands are plain JSON WebSocket text frames:
+Dashboard controls are plain JSON WebSocket text frames:
 
 ```json
-{"command":"forward"}
-{"command":"backward"}
-{"command":"left"}
-{"command":"right"}
-{"command":"stop"}
-{"command":"speed","speed":70}
+{"type":"control","x":0.0,"y":1.0,"speed":70}
+{"type":"control","x":0.6,"y":0.8,"speed":45}
+{"type":"stop"}
 {"command":"vacuum_on"}
 {"command":"vacuum_off"}
 {"command":"status"}
 ```
 
-The dashboard scales speed by joystick displacement up to the selected 0–100% maximum. The backend translates each movement update into one atomic dominant-direction-and-speed JSON frame, for example `{"command":"forward","speed":40}`. This command protocol carries only one direction at a time and cannot represent simultaneous diagonal axes; use `/robot` with firmware that parses vector commands when diagonal movement is required. The ESP32 must apply the received speed to its motor-driver PWM outputs when processing the frame. The ESP32 should report current state as:
+Joystick X is negative for left and positive for right; joystick Y is positive for forward and negative for backward. Speed is the selected 0–100% maximum scaled by joystick displacement; the ESP32 converts it to PWM `0..255`. For differential drive, calculate left=`y+x`, right=`y-x`, normalize both by the same factor when necessary, and apply the sign to direction pins and magnitude times speed to PWM. The existing firmware's motor-side polarity correction and 500 ms motor watchdog must be verified on the actual sketch. Stop is processed independently from vacuum and ultrasonic warning state. The ESP32 should continue to report current state as:
 
 ```json
 {"type":"status","connected":true,"speed":70,"obstacle":false,"vacuum":false}
 ```
 
-Only reported booleans update the obstacle and vacuum indicators. The obstacle state is warning-only and never changes movement commands. The repository does not contain the uploaded ESP32 sketch, so this documents the requested `/ws` wire contract; it cannot verify that the hardware firmware currently implements it.
+Only reported booleans update the obstacle and vacuum indicators. The obstacle state is warning-only and never changes movement commands. The included sketch sends the recognized `distanceCm`, `obstacleDetected`, `currentSpeed`, and `motorStatus` telemetry fields. The sketch source can be reviewed here, but the ESP32 and motor hardware have not been compiled against or physically tested in this workspace.
+
+### Uploading the ESP32 sketch
+
+1. Install Arduino IDE, the Espressif ESP32 board package, ArduinoJson 7, and the WebSockets library by Markus Sattler.
+2. Open `firmware/inspection-cleaning-bot.ino` and select **ESP32 Dev Module**.
+3. Replace `YOUR_WIFI_SSID` and `YOUR_WIFI_PASSWORD` on your local copy only; do not commit real credentials.
+4. With motor power disconnected, verify the L298N wiring against the existing pins: IN1=26, IN2=27, IN3=14, IN4=13, ENA=25, ENB=33; TRIG=5, ECHO=18; vacuum relay=23.
+5. Upload and open Serial Monitor at 115200 baud. First test with the wheels raised, low speed, and the hardware cutoff accessible. Verify forward motion on each side; change only the corresponding `INVERT_SIDE_A` or `INVERT_SIDE_B` value if that side runs backward.
+6. Confirm that disconnecting the dashboard stops both channels and that movement does not resume after reconnect. Ultrasonic readings should only change the warning display; vacuum commands remain separate.
 
 On `/robot`, the backend accepts actual sensor data sent by the ESP32 as `telemetry` or `robot_status` JSON. Recognized optional fields are:
 
@@ -148,11 +154,13 @@ The existing camera UI and its WebRTC signaling interface are retained. No ESP32
 - `CAMERA_STREAM_URL` — optional camera bridge source configuration; its format must be confirmed against the camera integration.
 - `VITE_DEMO_MODE` / `VITE_DEMO_VIDEO_URL` — optional explicitly labeled demo clip.
 - `VITE_ICE_SERVERS` — optional JSON array for the retained WebRTC camera signaling interface.
+- ESP32 Wi-Fi credentials are local firmware settings and must not be committed.
 
 ```text
 client/src/components/   Existing dashboard layout, controls, camera, telemetry, settings
 client/src/App.jsx        Socket.IO lifecycle, normalized joystick commands, safety behavior
 server.js                 Express, Socket.IO, native ESP32 WebSocket relay, validation, watchdog
+firmware/                 ESP32 L298N control, normalized mixer, sensor, relay, watchdog
 test/                     Mock-WebSocket integration test for dashboard-to-robot relay
 render.yaml               Existing Render service build/start configuration
 ```

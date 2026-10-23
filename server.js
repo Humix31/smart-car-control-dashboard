@@ -49,36 +49,60 @@ function broadcastStatus() {
 
 function sendControllerStop(socket) {
   if (socket.readyState !== WebSocket.OPEN) return false;
-  const message = socket.controllerProtocol === 'command-json'
-    ? { command: 'stop' }
-    : { type: 'stop' };
-  socket.send(JSON.stringify(message), (error) => {
+  socket.send(JSON.stringify({ type: 'stop' }), (error) => {
     if (error) log('controller.send-error', { message: error.message });
   });
   return true;
 }
 
-function sendMovement(command) {
-  const percentSpeed = Math.round(command.speed / 2.55);
-  const direction = Math.abs(command.x) > Math.abs(command.y)
-    ? (command.x > 0 ? 'right' : 'left')
-    : (command.y > 0 ? 'forward' : 'backward');
-
+function sendMovement(control) {
   for (const socket of robotSockets) {
     if (socket.readyState !== WebSocket.OPEN) continue;
     if (socket.controllerProtocol === 'command-json') {
-      const movementMessage = JSON.stringify({ command: direction, speed: percentSpeed });
+      const movementMessage = JSON.stringify({
+        type: 'control',
+        x: control.x,
+        y: control.y,
+        speed: control.speed,
+      });
       socket.send(movementMessage, (error) => {
         if (error) log('controller.send-error', { message: error.message });
       });
-      socket.selectedSpeed = percentSpeed;
+      socket.selectedSpeed = control.speed;
       continue;
     }
-    const movementMessage = JSON.stringify(command);
+    const movementMessage = JSON.stringify({
+      type: 'move',
+      x: Math.round(control.x * 100),
+      y: Math.round(control.y * 100),
+      speed: control.legacyPwm ?? Math.round(control.speed * 2.55),
+    });
     socket.send(movementMessage, (error) => {
       if (error) log('controller.send-error', { message: error.message });
     });
   }
+}
+
+function normalizeControlCommand(command) {
+  if (!command || typeof command !== 'object' || Array.isArray(command)) return null;
+  if (command.type === 'control' &&
+      typeof command.x === 'number' && Number.isFinite(command.x) && command.x >= -1 && command.x <= 1 &&
+      typeof command.y === 'number' && Number.isFinite(command.y) && command.y >= -1 && command.y <= 1 &&
+      Number.isInteger(command.speed) && command.speed >= 0 && command.speed <= 100) {
+    return { x: command.x, y: command.y, speed: command.speed };
+  }
+  if (command.type === 'move' &&
+      Number.isInteger(command.x) && command.x >= -100 && command.x <= 100 &&
+      Number.isInteger(command.y) && command.y >= -100 && command.y <= 100 &&
+      Number.isInteger(command.speed) && command.speed >= 0 && command.speed <= 255) {
+    return {
+      x: command.x / 100,
+      y: command.y / 100,
+      speed: command.speed === 0 ? 0 : Math.max(1, Math.round(command.speed / 2.55)),
+      legacyPwm: command.speed,
+    };
+  }
+  return null;
 }
 
 function stopVehicle(reason, { force = false } = {}) {
@@ -144,17 +168,14 @@ io.on('connection', (socket) => {
   });
 
   socket.on('vehicle:command', (...args) => {
-    const command = args[0];
+    const control = normalizeControlCommand(args[0]);
     const acknowledge = args.find((argument) => typeof argument === 'function') || (() => {});
-    if (!command || command.type !== 'move' ||
-        !Number.isInteger(command.x) || command.x < -100 || command.x > 100 ||
-        !Number.isInteger(command.y) || command.y < -100 || command.y > 100 ||
-        !Number.isInteger(command.speed) || command.speed < 0 || command.speed > 255) {
-      acknowledge({ ok: false, error: 'Invalid movement command. Expected type=move, integer axes -100..100, and PWM speed 0..255.' });
+    if (!control) {
+      acknowledge({ ok: false, error: 'Invalid control command. Expected type=control, finite axes -1..1, and integer speed 0..100.' });
       return;
     }
-    if (command.speed === 0 || (command.x === 0 && command.y === 0)) {
-      stopVehicle('zero movement command');
+    if (control.speed === 0 || (control.x === 0 && control.y === 0)) {
+      stopVehicle('zero movement command', { force: true });
       acknowledge({ ok: true });
       return;
     }
@@ -162,10 +183,9 @@ io.on('connection', (socket) => {
       acknowledge({ ok: false, error: 'Vehicle is disconnected or emergency-stopped.' });
       return;
     }
-    const forwarded = { type: 'move', x: command.x, y: command.y, speed: command.speed };
-    sendMovement(forwarded);
+    sendMovement(control);
     state.direction = 'move';
-    state.speed = Math.round(command.speed / 2.55);
+    state.speed = control.speed;
     socket.data.lastMovementAt = Date.now();
     acknowledge({ ok: true });
     broadcastStatus();
@@ -185,7 +205,10 @@ io.on('connection', (socket) => {
     state.speed = percent;
     for (const robot of robotSockets) {
       if (robot.controllerProtocol !== 'command-json' || robot.readyState !== WebSocket.OPEN) continue;
-      robot.send(JSON.stringify({ command: 'speed', speed: percent }), (error) => {
+      const message = percent === 0
+        ? { type: 'stop' }
+        : { type: 'control', x: 0, y: 0, speed: percent };
+      robot.send(JSON.stringify(message), (error) => {
         if (error) log('controller.send-error', { message: error.message });
       });
       robot.selectedSpeed = percent;
@@ -369,6 +392,7 @@ robotServer.on('connection', (socket, request, protocol) => {
       };
       for (const [key, value] of Object.entries(fields)) {
         if (key === 'motorStatus' && typeof value === 'string') state.telemetry[key] = value;
+        else if (key === 'distanceCm' && value === null) state.telemetry[key] = null;
         else if (typeof value === 'number' && Number.isFinite(value)) state.telemetry[key] = value;
       }
       if (typeof message.obstacleDetected === 'boolean') {

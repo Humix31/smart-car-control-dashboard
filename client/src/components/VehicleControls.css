@@ -8,9 +8,8 @@
 
 .joystick-control {
   position: relative;
-  width: 126px;
+  width: clamp(112px, 30vw, 136px);
   aspect-ratio: 1;
-  overflow: hidden;
   border: 1px solid #485761;
   border-radius: 50%;
   background: radial-gradient(circle, #1b2831 0, #131c23 62%, #10171d 63%);

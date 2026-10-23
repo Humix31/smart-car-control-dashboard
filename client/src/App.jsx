@@ -25,8 +25,8 @@ function now() {
 }
 
 function movementSpeedPercent(movement, maximumSpeed) {
-  const displacement = Math.min(100, Math.hypot(movement.x, movement.y));
-  return Math.round(maximumSpeed * displacement / 100);
+  const displacement = Math.min(1, Math.hypot(movement.x, movement.y));
+  return Math.round(maximumSpeed * displacement);
 }
 
 export default function App() {
@@ -49,6 +49,8 @@ export default function App() {
   const [emergencyStopped, setEmergencyStopped] = useState(false);
   const [events, setEvents] = useState([]);
   const movementRef = useRef(null);
+  const movementSourcesRef = useRef(new Map());
+  const refreshMovementRef = useRef(null);
   const socketRef = useRef(null);
   const movementIntervalRef = useRef(null);
   const speedRef = useRef(speed);
@@ -97,6 +99,8 @@ export default function App() {
       setVehicleConnected(false);
       setActiveDirection('');
       movementRef.current = null;
+      movementSourcesRef.current.clear();
+      pressedMovementKeysRef.current.clear();
       if (movementIntervalRef.current) window.clearInterval(movementIntervalRef.current);
       movementIntervalRef.current = null;
       setTelemetry(initialTelemetry);
@@ -109,6 +113,8 @@ export default function App() {
       if (!connected) {
         setActiveDirection('');
         movementRef.current = null;
+        movementSourcesRef.current.clear();
+        pressedMovementKeysRef.current.clear();
         if (movementIntervalRef.current) window.clearInterval(movementIntervalRef.current);
         movementIntervalRef.current = null;
       }
@@ -126,59 +132,87 @@ export default function App() {
     };
   }, [pushEvent]);
 
-  const stopMovement = useCallback(() => {
-    if (movementIntervalRef.current) window.clearInterval(movementIntervalRef.current);
-    movementIntervalRef.current = null;
-    if (movementRef.current && socketRef.current?.connected) socketRef.current.emit('vehicle:stop');
-    movementRef.current = null;
-    setActiveDirection('');
-  }, []);
+  const refreshMovement = useCallback(() => {
+    const combined = [...movementSourcesRef.current.values()].reduce((result, vector) => ({
+      x: result.x + vector.x,
+      y: result.y + vector.y,
+    }), { x: 0, y: 0 });
+    const magnitude = Math.hypot(combined.x, combined.y);
+    if (magnitude > 1) {
+      combined.x /= magnitude;
+      combined.y /= magnitude;
+    }
 
-  const startMovement = useCallback((vector) => {
-    if (!socketRef.current?.connected || !vehicleConnected || emergencyStopped || speedRef.current === 0) return;
-    const direction = botType === 'vacuum' ? -1 : 1;
-    const x = Math.max(-100, Math.min(100, Math.round(vector.x * direction)));
-    const y = Math.max(-100, Math.min(100, Math.round(vector.y * direction)));
-    if (x === 0 && y === 0) return;
-    if (movementRef.current) return;
-    movementRef.current = { x, y };
-    setActiveDirection(Math.abs(y) >= Math.abs(x) ? (y > 0 ? 'forward' : 'reverse') : (x > 0 ? 'right' : 'left'));
+    if (magnitude === 0 || !socketRef.current?.connected || !vehicleConnected || emergencyStopped || speedRef.current === 0) {
+      if (movementIntervalRef.current) window.clearInterval(movementIntervalRef.current);
+      movementIntervalRef.current = null;
+      if (movementRef.current && socketRef.current?.connected) socketRef.current.emit('vehicle:stop');
+      movementRef.current = null;
+      setActiveDirection('');
+      return;
+    }
+
+    const movement = { x: combined.x, y: combined.y };
+    movementRef.current = movement;
+    setActiveDirection(Math.abs(movement.y) >= Math.abs(movement.x)
+      ? (movement.y > 0 ? 'forward' : 'reverse')
+      : (movement.x > 0 ? 'right' : 'left'));
+
     const sendCommand = () => {
-      const movement = movementRef.current;
-      if (!socketRef.current?.connected || !movement) return;
+      const currentMovement = movementRef.current;
+      if (!socketRef.current?.connected || !currentMovement) return;
       socketRef.current.emit('vehicle:command', {
-        type: 'move',
-        x: movement.x,
-        y: movement.y,
-        speed: Math.round(movementSpeedPercent(movement, speedRef.current) * 2.55),
+        type: 'control',
+        x: currentMovement.x,
+        y: currentMovement.y,
+        speed: movementSpeedPercent(currentMovement, speedRef.current),
       }, (result) => {
         if (!result?.ok) {
-          stopMovement();
+          movementSourcesRef.current.clear();
+          if (movementIntervalRef.current) window.clearInterval(movementIntervalRef.current);
+          movementIntervalRef.current = null;
+          movementRef.current = null;
+          setActiveDirection('');
           const message = result?.error || 'Movement command rejected.';
           setConnectionError(message);
           pushEvent(message, 'error');
         }
       });
     };
+
     if (!movementIntervalRef.current) {
       sendCommand();
       movementIntervalRef.current = window.setInterval(sendCommand, 150);
     }
-  }, [botType, vehicleConnected, emergencyStopped, stopMovement, pushEvent]);
+  }, [botType, vehicleConnected, emergencyStopped, pushEvent]);
+  refreshMovementRef.current = refreshMovement;
 
-  const updateMovement = useCallback((vector) => {
-    if (!movementRef.current) {
-      startMovement(vector);
+  const startMovement = useCallback((vector, source = 'primary') => {
+    if (!socketRef.current?.connected || !vehicleConnected || emergencyStopped || speedRef.current === 0) return;
+    movementSourcesRef.current.set(source, vector);
+    refreshMovementRef.current?.();
+  }, [vehicleConnected, emergencyStopped]);
+
+  const updateMovement = useCallback((vector, source = 'primary') => {
+    if (!socketRef.current?.connected || !vehicleConnected || emergencyStopped || speedRef.current === 0) return;
+    movementSourcesRef.current.set(source, vector);
+    refreshMovementRef.current?.();
+  }, [vehicleConnected, emergencyStopped]);
+
+  const stopMovement = useCallback((source) => {
+    if (source !== undefined) {
+      movementSourcesRef.current.delete(source);
+      refreshMovementRef.current?.();
       return;
     }
-    if (!socketRef.current?.connected || !vehicleConnected || emergencyStopped) return;
-    const direction = botType === 'vacuum' ? -1 : 1;
-    const x = Math.max(-100, Math.min(100, Math.round(vector.x * direction)));
-    const y = Math.max(-100, Math.min(100, Math.round(vector.y * direction)));
-    if (x === 0 && y === 0) return;
-    movementRef.current = { x, y };
-    setActiveDirection(Math.abs(y) >= Math.abs(x) ? (y > 0 ? 'forward' : 'reverse') : (x > 0 ? 'right' : 'left'));
-  }, [botType, vehicleConnected, emergencyStopped, startMovement]);
+    pressedMovementKeysRef.current.clear();
+    movementSourcesRef.current.clear();
+    if (movementIntervalRef.current) window.clearInterval(movementIntervalRef.current);
+    movementIntervalRef.current = null;
+    if (movementRef.current && socketRef.current?.connected) socketRef.current.emit('vehicle:stop');
+    movementRef.current = null;
+    setActiveDirection('');
+  }, []);
 
   function changeSpeed(value) {
     setSpeed(value);
@@ -187,10 +221,10 @@ export default function App() {
       const event = movement && value > 0 ? 'vehicle:command' : 'vehicle:speed';
       const payload = movement && value > 0
         ? {
-            type: 'move',
+            type: 'control',
             x: movement.x,
             y: movement.y,
-            speed: Math.round(movementSpeedPercent(movement, value) * 2.55),
+            speed: movementSpeedPercent(movement, value),
           }
         : value;
       socketRef.current.emit(event, payload, (result) => {
@@ -229,7 +263,7 @@ export default function App() {
     }
     pushEvent(
       nextBotType === 'vacuum'
-        ? 'Vacuum bot selected. Forward/reverse and left/right controls are reversed.'
+        ? 'Vacuum bot selected. Movement directions match the joystick axes.'
         : 'Inspection bot selected. Forward movement is enabled.',
       'info',
     );
@@ -237,10 +271,10 @@ export default function App() {
 
   useEffect(() => {
     const movementKeys = {
-      KeyW: { x: 0, y: 100 },
-      KeyA: { x: -100, y: 0 },
-      KeyS: { x: 0, y: -100 },
-      KeyD: { x: 100, y: 0 },
+      KeyW: { x: 0, y: 1 },
+      KeyA: { x: -1, y: 0 },
+      KeyS: { x: 0, y: -1 },
+      KeyD: { x: 1, y: 0 },
     };
     const isTextEntry = (target) => target instanceof HTMLElement && (
       ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable
@@ -248,15 +282,15 @@ export default function App() {
     const updateKeyboardMovement = () => {
       const pressed = pressedMovementKeysRef.current;
       if (pressed.size === 0) {
-        stopMovement();
+        stopMovement('keyboard');
         return;
       }
       const vector = [...pressed].reduce((current, key) => ({
         x: current.x + movementKeys[key].x,
         y: current.y + movementKeys[key].y,
       }), { x: 0, y: 0 });
-      if (vector.x === 0 && vector.y === 0) stopMovement();
-      else updateMovement(vector);
+      if (vector.x === 0 && vector.y === 0) stopMovement('keyboard');
+      else updateMovement(vector, 'keyboard');
     };
     const handleKeyDown = (event) => {
       if (isTextEntry(event.target)) return;
@@ -350,7 +384,7 @@ export default function App() {
           <div className="bot-profile-copy">
             <p className="eyebrow">ACTIVE BOT PROFILE</p>
             <strong>{botType === 'inspection' ? 'Inspection Bot' : 'Vacuum Bot'}</strong>
-            <span>{botType === 'inspection' ? 'Forward controls drive forward.' : 'Forward/reverse and left/right controls are swapped.'}</span>
+            <span>Forward and right controls match the joystick axes.</span>
           </div>
           <div className="bot-profile-options" role="group" aria-label="Select bot type">
             <button
@@ -381,10 +415,10 @@ export default function App() {
           </div>
           <aside className="control-column" id="controls">
             <section className="panel control-panel">
-              <div className="panel-heading"><div><div className="eyebrow">{botType === 'inspection' ? 'INSPECTION BOT' : 'VACUUM BOT · REVERSED CONTROLS'}</div><h2>Drive controls</h2></div><span className={`control-ready ${movementEnabled ? 'ready' : ''}`}><i />{movementEnabled ? 'READY' : 'LOCKED'}</span></div>
+              <div className="panel-heading"><div><div className="eyebrow">{botType === 'inspection' ? 'INSPECTION BOT' : 'VACUUM BOT'}</div><h2>Drive controls</h2></div><span className={`control-ready ${movementEnabled ? 'ready' : ''}`}><i />{movementEnabled ? 'READY' : 'LOCKED'}</span></div>
               <div className="control-content">
                 <div className="control-help"><span>PRESS & HOLD TO MOVE</span><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span></div>
-                <DirectionalControls enabled={movementEnabled && speed > 0} activeDirection={activeDirection} onStart={startMovement} onMove={updateMovement} onStop={stopMovement} reversed={botType === 'vacuum'} />
+                <DirectionalControls enabled={movementEnabled && speed > 0} activeDirection={activeDirection} onStart={startMovement} onMove={updateMovement} onStop={stopMovement} />
                 <SpeedSlider value={speed} onChange={changeSpeed} disabled={!vehicleConnected} />
                 <div className="control-readout"><span><i className="tiny-car"><CarFront size={15} /></i> SELECTED SPEED</span><b>{speed}<small> %</small></b></div>
                 <div className="control-quick-info"><span><Zap size={13} /> {speed}% MAX</span><span><span className="kbd-label">SPACE</span> STOP</span></div>

@@ -1,51 +1,71 @@
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CircleStop } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import './VehicleControls.css';
 
 const controls = [
-  { direction: 'forward', label: 'Forward', key: 'W', icon: ArrowUp, className: 'up', x: 0, y: 100 },
-  { direction: 'left', label: 'Turn left', key: 'A', icon: ArrowLeft, className: 'left', x: -100, y: 0 },
-  { direction: 'reverse', label: 'Reverse', key: 'S', icon: ArrowDown, className: 'down', x: 0, y: -100 },
-  { direction: 'right', label: 'Turn right', key: 'D', icon: ArrowRight, className: 'right', x: 100, y: 0 },
+  { direction: 'forward', label: 'Forward', key: 'W', icon: ArrowUp, className: 'up', x: 0, y: 1 },
+  { direction: 'left', label: 'Turn left', key: 'A', icon: ArrowLeft, className: 'left', x: -1, y: 0 },
+  { direction: 'reverse', label: 'Reverse', key: 'S', icon: ArrowDown, className: 'down', x: 0, y: -1 },
+  { direction: 'right', label: 'Turn right', key: 'D', icon: ArrowRight, className: 'right', x: 1, y: 0 },
 ];
 
-export function DirectionalControls({ enabled, activeDirection, onStart, onMove, onStop, reversed = false }) {
+export function DirectionalControls({ enabled, activeDirection, onStart, onMove, onStop }) {
   const joystickRef = useRef(null);
+  const knobRef = useRef(null);
+  const joystickPointerRef = useRef(null);
+  const joystickStartedRef = useRef(false);
   const [knob, setKnob] = useState({ x: 0, y: 0 });
-  const displayedControls = controls.map((control) => {
-    if (!reversed) return control;
-    const opposite = controls.find(({ direction }) => (
-      direction === { forward: 'reverse', reverse: 'forward', left: 'right', right: 'left' }[control.direction]
-    ));
-    return opposite
-      ? { ...control, direction: opposite.direction, label: opposite.label, icon: opposite.icon }
-      : control;
-  });
+  useEffect(() => {
+    if (!enabled && joystickPointerRef.current) releaseJoystick();
+  }, [enabled]);
 
-  function updateJoystick(event, initial = false) {
+  function updateJoystick(event) {
     const bounds = joystickRef.current?.getBoundingClientRect();
-    if (!bounds) return;
-    const radius = bounds.width / 2 - 24;
-    let x = (event.clientX - bounds.left - bounds.width / 2) / radius;
-    let y = (event.clientY - bounds.top - bounds.height / 2) / radius;
-    const commandX = Math.max(-1, Math.min(1, x));
-    const commandY = Math.max(-1, Math.min(1, y));
-    const magnitude = Math.hypot(x, y);
-    if (magnitude > 1) {
-      x /= magnitude;
-      y /= magnitude;
+    const knobBounds = knobRef.current?.getBoundingClientRect();
+    const pointer = joystickPointerRef.current;
+    if (!bounds || !knobBounds || !pointer) return;
+
+    const centerX = bounds.left + bounds.width / 2;
+    const centerY = bounds.top + bounds.height / 2;
+    const border = Number.parseFloat(window.getComputedStyle(joystickRef.current).borderWidth) || 0;
+    const radius = Math.max(0, Math.min(bounds.width, bounds.height) / 2
+      - Math.max(knobBounds.width, knobBounds.height) / 2 - border);
+    if (radius === 0) return;
+
+    let knobX = event.clientX - centerX - pointer.offsetX;
+    let knobY = event.clientY - centerY - pointer.offsetY;
+    const distance = Math.hypot(knobX, knobY);
+    if (distance > radius) {
+      const scale = radius / distance;
+      knobX *= scale;
+      knobY *= scale;
     }
-    const knobX = x * radius;
-    const knobY = y * radius;
+
     setKnob({ x: knobX, y: knobY });
-    if (Math.hypot(commandX, commandY) < 0.08) onStop();
-    else if (initial) onStart({ x: commandX * 100, y: -commandY * 100 });
-    else onMove({ x: commandX * 100, y: -commandY * 100 });
+    const vector = { x: knobX / radius, y: -knobY / radius };
+    if (Math.hypot(vector.x, vector.y) < 0.04) {
+      if (joystickStartedRef.current) onStop(pointer.source);
+      joystickStartedRef.current = false;
+      return;
+    }
+    if (joystickStartedRef.current) onMove(vector, pointer.source);
+    else {
+      joystickStartedRef.current = true;
+      onStart(vector, pointer.source);
+    }
   }
 
-  function releaseJoystick() {
+  function releaseJoystick(event) {
+    const pointer = joystickPointerRef.current;
+    if (!pointer || (event?.pointerId !== undefined && pointer.pointerId !== event.pointerId)) return;
+    joystickPointerRef.current = null;
+    if (joystickStartedRef.current) onStop(pointer.source);
+    joystickStartedRef.current = false;
     setKnob({ x: 0, y: 0 });
-    onStop();
+    const target = event?.currentTarget || joystickRef.current;
+    if (target?.hasPointerCapture(pointer.pointerId)) {
+      target.releasePointerCapture(pointer.pointerId);
+    }
   }
 
   return (
@@ -57,35 +77,54 @@ export function DirectionalControls({ enabled, activeDirection, onStart, onMove,
           role="application"
           aria-label="Analog joystick. Drag to steer; release to stop."
           onPointerDown={(event) => {
-            if (!enabled) return;
+            if (!enabled || joystickPointerRef.current) return;
             event.preventDefault();
             event.currentTarget.setPointerCapture(event.pointerId);
-            updateJoystick(event, true);
+            const bounds = event.currentTarget.getBoundingClientRect();
+            joystickPointerRef.current = {
+              pointerId: event.pointerId,
+              source: `joystick:${event.pointerId}`,
+              offsetX: event.clientX - (bounds.left + bounds.width / 2),
+              offsetY: event.clientY - (bounds.top + bounds.height / 2),
+            };
           }}
           onPointerMove={(event) => {
-            if (enabled && event.currentTarget.hasPointerCapture(event.pointerId)) updateJoystick(event);
+            if (enabled && joystickPointerRef.current?.pointerId === event.pointerId) updateJoystick(event);
           }}
           onPointerUp={releaseJoystick}
           onPointerCancel={releaseJoystick}
           onLostPointerCapture={releaseJoystick}
+          onPointerLeave={(event) => {
+            if (joystickPointerRef.current?.pointerId === event.pointerId) releaseJoystick(event);
+          }}
         >
           <span className="joystick-axis joystick-axis-x" />
           <span className="joystick-axis joystick-axis-y" />
-          <span className="joystick-nub" style={{ transform: `translate(calc(-50% + ${knob.x}px), calc(-50% + ${knob.y}px))` }} />
+          <span ref={knobRef} className="joystick-nub" style={{ transform: `translate(calc(-50% + ${knob.x}px), calc(-50% + ${knob.y}px))` }} />
         </div>
         <span className="joystick-instruction">DRAG TO STEER · RELEASE TO STOP</span>
       </div>
-      {displayedControls.map(({ direction, label, key, icon: Icon, className, x, y }) => (
+      {controls.map(({ direction, label, key, icon: Icon, className, x, y }) => (
         <button
           key={direction}
           type="button"
           className={`direction-button ${className} ${activeDirection === direction ? 'active' : ''}`}
           aria-label={`${label}, ${key}`}
           disabled={!enabled}
-          onPointerDown={(event) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); onStart({ x, y }); }}
-          onPointerUp={onStop}
-          onPointerCancel={onStop}
-          onLostPointerCapture={onStop}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            onStart({ x, y }, `button:${event.pointerId}`);
+          }}
+          onPointerUp={(event) => onStop(`button:${event.pointerId}`)}
+          onPointerCancel={(event) => onStop(`button:${event.pointerId}`)}
+          onLostPointerCapture={(event) => onStop(`button:${event.pointerId}`)}
+          onPointerLeave={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              event.currentTarget.releasePointerCapture(event.pointerId);
+              onStop(`button:${event.pointerId}`);
+            }
+          }}
           onContextMenu={(event) => event.preventDefault()}
         ><Icon size={21} /><span>{label}</span></button>
       ))}
